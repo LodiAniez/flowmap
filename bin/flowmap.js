@@ -170,7 +170,9 @@ function syncForJourney(root, map, journey, flags, { widen = true } = {}) {
   // A hand-edited draft can carry anything here; checkDraft guards the same way, and this runs
   // before it now.
   const hops = Array.isArray(journey?.hops) ? journey.hops : []
-  const ids = [...new Set(hops.map((h) => h?.repo).filter((id) => id && map.repos[id]))]
+  const ids = [
+    ...new Set(hops.map((h) => h?.repo).filter((id) => id && Object.hasOwn(map.repos ?? {}, id))),
+  ]
   if (!ids.length) return []
   // Widen: verify's cone is built from the journeys already in the map, so it cannot contain
   // a draft's anchors. Resolving them against a checkout verify narrowed reports files that
@@ -1004,6 +1006,13 @@ const COMMANDS = {
 
 async function main() {
   const { flags, positional } = parseArgs(process.argv.slice(2))
+  const [name = 'help', ...rest] = positional
+
+  // Before any validation: `flowmap --help --format=` should print usage, not complain.
+  // Help first: `flowmap --help --format=` should print usage, not complain about a flag.
+  if (flags.help === true || flags.h === true) return help()
+
+  rejectEmptyBooleans(flags)
   // Every other value flag is guarded at its command; `--format` is read everywhere, so guard
   // it once here. `--format=` silently yields human prose to a caller parsing TSV.
   if (flags.format !== undefined) {
@@ -1013,10 +1022,7 @@ async function main() {
       throw new UserError(`--format must be "agent" or "human"`, EXIT_USAGE)
     }
   }
-  const [name = 'help', ...rest] = positional
 
-  rejectEmptyBooleans(flags)
-  if (flags.help === true || flags.h === true) return help()
   // hasOwn: `in` walks the prototype, so `flowmap toString` reported itself as "not built yet"
   // followed by the source of Object.prototype.toString.
   if (Object.hasOwn(PLANNED, name)) {

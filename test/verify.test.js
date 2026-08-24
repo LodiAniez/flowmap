@@ -745,3 +745,58 @@ test('a reachable repo is not flagged narrowed, and records normally', () => {
   assert.equal(result.repos[0].narrowed, false)
   assert.ok(map.verified.svc, 'and a complete checkout is still recorded')
 })
+
+// A repo pulled in only to read its schemas has its anchors forced to []. When the run is
+// scoped by repoIds alone, byRepo and everyAnchor are the same object, so covers() compares 0
+// against 0 and passes — recording a repo as verified having resolved none of its anchors, and
+// moving its sha so the next full run reports no drift either.
+test('a schema-only repo that also hosts hops is not recorded by a scoped run', () => {
+  const shared = join(root, 'shared-with-hops')
+  mkdirSync(join(shared, 'src'), { recursive: true })
+  writeFileSync(join(shared, 'src', 'schema.ts'), 'export const Thing = z.object({ total: z.number() })\n')
+  writeFileSync(join(shared, 'src', 'handler.ts'), 'export function sharedHandler() {}\n')
+  run(['init', '-q', '-b', 'main'], shared)
+  run(['add', '-A'], shared)
+  run(['-c', 'user.email=t@e.com', '-c', 'user.name=t', 'commit', '-qm', 'init'], shared)
+
+  const map = {
+    repos: { svc: { url: upstream, branch: 'main' }, shared: { url: shared, branch: 'main' } },
+    contracts: { thing: { kind: 'event', schema: 'shared/src/schema.ts', fields: ['total'] } },
+    verified: {},
+    journeys: {
+      main: { hops: [{ repo: 'svc', reads: 'src/handler.ts::handleThing', outbound: 'thing' }] },
+      // shared hosts a hop of its own, so covers() cannot fall back to the all === 0 guard.
+      other: { hops: [{ repo: 'shared', reads: 'src/handler.ts::sharedHandler' }] },
+    },
+  }
+  const mapPath = join(root, 'flowmap-schemaonly-hops.json')
+  writeFileSync(mapPath, JSON.stringify(map))
+
+  verify(root, map, mapPath, { repoIds: ['svc'] })
+  assert.ok(map.verified.svc, 'the scoped repo is recorded')
+  assert.equal(map.verified.shared, undefined,
+    'the schema-only repo resolved nothing, so it must not be stamped verified')
+})
+
+// One bucket per contract: overlapping them produced two TSV rows for the same id with
+// contradictory statuses, and double-counted the "N contract(s) not checked" totals.
+test('a contract appears in at most one not-checked bucket', () => {
+  const map = {
+    repos: { a: { url: upstream, branch: 'main' }, gone: { url: '/nonexistent/x', branch: 'main' } },
+    contracts: { shared: { kind: 'event', schema: 'src/x.ts', fields: [] } },
+    verified: {},
+    journeys: {
+      ja: { hops: [{ repo: 'a', reads: 'src/handler.ts::handleThing' }] },
+      // The same contract carried by a failed repo and by an unregistered one.
+      jb: { hops: [{ repo: 'gone', reads: 'x.ts::y', outbound: 'shared' }] },
+      jc: { hops: [{ repo: 'never-registered', reads: 'x.ts::y', outbound: 'shared' }] },
+    },
+  }
+  const mapPath = join(root, 'flowmap-one-bucket.json')
+  writeFileSync(mapPath, JSON.stringify(map))
+
+  const r = verify(root, map, mapPath)
+  const buckets = [r.contractsStranded, r.contractsUnregistered, r.contractsPartial, r.contractsOutOfScope]
+  const appearances = buckets.filter((b) => b.includes('shared')).length
+  assert.equal(appearances, 1, 'exactly one bucket may claim it')
+})

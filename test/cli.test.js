@@ -382,3 +382,21 @@ test('an agent run that checked nothing still says so', () => {
   assert.match(r.err, /nothing to verify/, 'the run genuinely checked nothing')
   assert.match(r.out, /onB/, 'and stdout must still carry the contract it could not check')
 })
+
+// The last bracket-access repo lookup: a hand-edited draft naming a prototype key passed the
+// "is it registered" filter and reached syncRepo, which failed on the missing url.
+test('a draft hop naming a prototype key is treated as unregistered', () => {
+  const dir = join(root, 'drafts')
+  mkdirSync(dir, { recursive: true })
+  writeFileSync(join(dir, 'proto.json'), JSON.stringify({
+    name: 'proto', hops: [{ repo: 'constructor', reads: 'a.ts::b' }],
+  }))
+  const r = flowmap('draft', '--check', 'proto')
+  assert.doesNotMatch(r.err, /has no url/, 'it must be skipped, not handed to syncRepo')
+})
+
+test('--help is not pre-empted by flag validation', () => {
+  const r = flowmap('--help', '--format=')
+  assert.equal(r.code, 0)
+  assert.match(r.out, /cross-repo data-flow/)
+})
