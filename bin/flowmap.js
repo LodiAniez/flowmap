@@ -558,6 +558,11 @@ function verifyCmd(args, flags) {
 
   let repoIds = list(flags.repos)
   if (flags.local === true) {
+    // Two scopes, one of which would silently win. Everywhere else this branch rejects a flag
+    // combination that leaves the caller believing they scoped something they did not.
+    if (repoIds.length) {
+      throw new UserError('--local and --repos both set a scope; use one', EXIT_USAGE)
+    }
     const id = localRepoId(map)
     if (!id) throw new UserError('--local needs to run inside a registered repo', EXIT_USAGE)
     repoIds = [id]
@@ -631,16 +636,12 @@ function verifyCmd(args, flags) {
 
   if (isAgentFormat(flags)) {
     // Only the problems: a clean anchor is not news, and the point is to stay cheap.
-    // Ambiguous and unsearched schemas are not "issues", but an agent still needs to know a
-    // verdict was a coin toss or never taken — silence reads as a clean result.
-    const notable = result.contracts.filter(
-      (c) => c.status === 'schema-ambiguous' || c.status === 'schema-repo-not-synced'
-    )
-    // Contracts dropped before they were ever checked produce no `contracts` entry at all, so
-    // without these the agent sees an empty result and reads it as clean.
+    // skippedRows() already carries the ambiguous and unsearched verdicts as well as the
+    // never-checked buckets. Adding them here too emitted each one twice, so an agent counting
+    // rows double-counted the finding.
     const rows = [
       ...result.broken.map(verifyRow),
-      ...contractRows([...result.contractIssues, ...notable]),
+      ...contractRows(result.contractIssues),
       ...skippedRows(),
     ]
     if (rows.length) process.stdout.write(tsv(rows) + '\n')
@@ -701,10 +702,15 @@ function verifyCmd(args, flags) {
       process.stdout.write(`    ${dim(`${b.journey} hop ${b.hop} ${b.side}`)}  ${b.repo}  ${b.anchor}\n`)
       process.stdout.write(`      ${red(statusLabel(b.status) ?? b.status)}\n`)
     }
+    // Only blame the map when the code was actually readable. An anchor that failed because
+    // its repo could not be cloned, or because the checkout came up short, says nothing about
+    // whether the map is right — and sending someone to re-draft a correct journey is the
+    // misdirection this branch exists to avoid.
+    const localFailure = stale.length > 0 || result.repos.some((r) => r.error)
     process.stdout.write(
-      stale.length
-        ? dim('\n  Some checkouts are incomplete, so these may simply not have been fetched.\n') +
-            dim('  Re-run once origin is reachable before treating them as map drift.\n')
+      localFailure
+        ? dim('\n  Some repos could not be read in full, so these may simply not have been\n') +
+            dim('  fetched. Re-run once they are reachable before treating this as map drift.\n')
         : dim('\n  The map is out of date, not the code. Fix the anchors, or re-draft the journey.\n')
     )
   } else if (result.rows.length) {

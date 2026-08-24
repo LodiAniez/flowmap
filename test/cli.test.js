@@ -400,3 +400,33 @@ test('--help is not pre-empted by flag validation', () => {
   assert.equal(r.code, 0)
   assert.match(r.out, /cross-repo data-flow/)
 })
+
+// skippedRows() already carries ambiguous and unsearched verdicts; adding them separately
+// emitted each twice, so an agent counting rows double-counted the finding.
+test('the agent format emits each contract verdict once', () => {
+  const dup = join(root, 'dup.json')
+  writeFileSync(dup, JSON.stringify({
+    repos: { a: { url: repo, branch: 'main' }, b: { url: repo, branch: 'main' } },
+    // A bare path that exists in both repos: ambiguous.
+    contracts: { 'order.created': { kind: 'event', schema: 'src/handler.ts', fields: [] } },
+    journeys: {
+      f: {
+        hops: [
+          { repo: 'a', reads: 'src/handler.ts::handleThing', outbound: 'order.created' },
+          { repo: 'b', inbound: 'order.created', reads: 'src/handler.ts::handleThing' },
+        ],
+      },
+    },
+    verified: {},
+  }))
+  const r = flowmap('verify', '--format=agent', { mapPath: dup, cache: join(root, '.cache-dup') })
+  const rows = r.out.trim().split('\n').filter((l) => l.includes('order.created'))
+  assert.equal(rows.length, new Set(rows).size, 'no row may be emitted twice')
+})
+
+// Two flags that both set a scope, one of which silently won.
+test('--local and --repos together are a usage error', () => {
+  const r = flowmap('verify', '--local', '--repos', 'svc')
+  assert.equal(r.code, 2)
+  assert.match(r.err, /both set a scope/)
+})
