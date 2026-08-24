@@ -191,3 +191,24 @@ test('a null journey or contract entry does not throw', () => {
   assert.doesNotThrow(() => checkContractWith(broken, null, null))
   assert.equal(checkContractWith(broken, null, null).status, NO_SCHEMA)
 })
+
+// TypeScript interfaces are the commonest non-zod schema shape, and `extends` hides fields
+// exactly the way `.extend()` does.
+test('a TS interface extending an unreadable base is inconclusive', () => {
+  writeFileSync(join(repo, 'src', 'iface.ts'),
+    "import type { BasePayload } from '@acme/contracts'\nexport interface Order extends BasePayload { total: number }\n")
+  assert.equal(check({ schema: 'src/iface.ts', fields: ['total', 'tenantId'] }).status, INCONCLUSIVE)
+})
+
+// Counting the last frontier rather than unfollowed imports made every two-level import graph
+// permanently inconclusive, so genuine drift could never be reported.
+test('a fully-followed import graph can still report a missing field', () => {
+  mkdirSync(join(repo, 'src', 'deep'), { recursive: true })
+  writeFileSync(join(repo, 'src', 'deep', 'leaf.ts'), 'export const Leaf = z.object({ deep: z.string() })\n')
+  writeFileSync(join(repo, 'src', 'deep', 'mid.ts'), "export * from './leaf.js'\n")
+  writeFileSync(join(repo, 'src', 'twolevel.ts'),
+    "import { Leaf } from './deep/mid.js'\nexport const S = z.object({ own: z.string() })\n")
+  const r = check({ schema: 'src/twolevel.ts', fields: ['own', 'deep', 'absent'] })
+  assert.equal(r.status, FIELDS_MISSING, 'the graph was fully read, so absence is real')
+  assert.deepEqual(r.missing, ['absent'])
+})

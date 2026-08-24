@@ -60,8 +60,12 @@ function scopeFor(map, flags, purpose) {
 
 function ensureSynced(root, map, ids, flags, mode = 'full', { widen = false } = {}) {
   const missing = ids.filter((id) => !isSynced(root, id))
-  if (missing.length && flags['no-sync'] === true) {
-    throw new UserError(`not synced: ${missing.join(', ')}\nDrop --no-sync or run \`flowmap sync\`.`)
+  if (flags['no-sync'] === true) {
+    if (missing.length) {
+      throw new UserError(`not synced: ${missing.join(', ')}\nDrop --no-sync or run \`flowmap sync\`.`)
+    }
+    // Widening a blobless sparse clone has to fetch, which --no-sync promised not to do.
+    widen = false
   }
   if (missing.length) {
     process.stderr.write(dim(`syncing ${missing.length} repo(s): ${missing.join(', ')}\n`))
@@ -167,6 +171,13 @@ function draftJourney(feature, flags) {
     synced,
     force: flags.force === true,
   })
+
+  for (const r of synced.filter((x) => x.narrowed)) {
+    process.stderr.write(
+      yellow(`warning: ${r.id} is still a partial checkout — candidates may be incomplete\n`) +
+        dim(`  flowmap could not fetch the rest of it; retry when origin is reachable\n`)
+    )
+  }
 
   const brief = buildBrief(root, map, {
     name: feature,
@@ -384,7 +395,9 @@ function verifyCmd(args, flags) {
   if (!Object.keys(map.journeys).length) {
     throw new UserError(`no journeys in ${display(root, path)} yet — flowmap draft journey <feature>`)
   }
-  const named = args.filter((a) => !NOUNS.has(a))
+  // Strip the noun only when it is not itself a journey name — otherwise a feature called
+  // "journey" silently verifies everything while looking scoped.
+  const named = args.filter((a) => !NOUNS.has(a) || Object.hasOwn(map.journeys, a))
 
   // Validate every spelling, positional and flag alike. An unrecognised name would otherwise
   // resolve to zero anchors and print "every anchor resolves" — a clean bill of health for
@@ -400,9 +413,6 @@ function verifyCmd(args, flags) {
         EXIT_USAGE
       )
     }
-  }
-  if (!Object.keys(map.journeys).length) {
-    throw new UserError(`no journeys in ${display(root, path)} yet — flowmap draft journey <feature>`)
   }
 
   // --local is the PR-time scope: only this repo's anchors, which are the only ones the
@@ -424,13 +434,6 @@ function verifyCmd(args, flags) {
     journeys: requested.length ? requested : null,
   })
 
-  if (isAgentFormat(flags)) {
-    // Only the problems: a clean anchor is not news, and the point is to stay cheap.
-    const rows = [...result.broken.map(verifyRow), ...contractRows(result.contractIssues)]
-    if (rows.length) process.stdout.write(tsv(rows) + '\n')
-    return
-  }
-
   if (!result.repos.length) {
     throw new UserError(
       `nothing to verify in that scope — no journey hop names ` +
@@ -440,6 +443,13 @@ function verifyCmd(args, flags) {
     )
   }
 
+  if (isAgentFormat(flags)) {
+    // Only the problems: a clean anchor is not news, and the point is to stay cheap.
+    const rows = [...result.broken.map(verifyRow), ...contractRows(result.contractIssues)]
+    if (rows.length) process.stdout.write(tsv(rows) + '\n')
+    return
+  }
+
   for (const r of result.repos) {
     if (r.error) {
       process.stdout.write(`  ${red('!')} ${bold(r.id)}  ${yellow(r.error)}\n`)
@@ -447,9 +457,8 @@ function verifyCmd(args, flags) {
     }
     const all = r.ok === r.total
     const mark = all ? green('ok') : red('!!')
-    process.stdout.write(
-      `  ${mark}  ${bold(r.id)}  ${dim(`${r.ok}/${r.total} anchors  ${r.branch} @ ${r.sha.slice(0, 7)}`)}\n`
-    )
+    const tally = r.total > 0 ? `${r.ok}/${r.total} anchors  ` : 'schemas only  '
+    process.stdout.write(`  ${mark}  ${bold(r.id)}  ${dim(`${tally}${r.branch} @ ${r.sha.slice(0, 7)}`)}\n`)
     // Drift is the interesting output: not "it failed" but "here is what moved under you".
     if (r.moved) {
       const n = r.range?.commits

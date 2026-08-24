@@ -219,3 +219,81 @@ test('a schema-only repo is not recorded by a scoped run', async () => {
   verify(root, map, mapPath, { journeys: ['flow'] })
   assert.equal(map.verified.contracts, undefined, 'a scoped run vouches for nothing')
 })
+
+// The checkout cache is shared across commands and runs, so a cone derived from one journey's
+// scope leaves every other journey's files absent — later reported as anchors that no longer
+// resolve, on code that is perfectly fine.
+test('a scoped run does not narrow the cache against other journeys', async () => {
+  const { resolveAnchor } = await import('../lib/anchor.js')
+  const two = join(root, 'two-journey')
+  mkdirSync(join(two, 'src', 'a'), { recursive: true })
+  mkdirSync(join(two, 'src', 'b'), { recursive: true })
+  writeFileSync(join(two, 'src', 'a', 'one.ts'), 'export function alpha() {}\n')
+  writeFileSync(join(two, 'src', 'b', 'two.ts'), 'export function beta() {}\n')
+  run(['init', '-q', '-b', 'main'], two)
+  run(['add', '-A'], two)
+  run(['-c', 'user.email=t@e.com', '-c', 'user.name=t', 'commit', '-qm', 'init'], two)
+
+  const map = {
+    repos: { pair: { url: two, branch: 'main' } },
+    contracts: {},
+    verified: {},
+    journeys: {
+      a: { hops: [{ repo: 'pair', reads: 'src/a/one.ts::alpha' }] },
+      b: { hops: [{ repo: 'pair', reads: 'src/b/two.ts::beta' }] },
+    },
+  }
+  const mapPath = join(root, 'flowmap-two.json')
+  writeFileSync(mapPath, JSON.stringify(map))
+
+  verify(root, map, mapPath, { journeys: ['a'] })
+  assert.equal(resolveAnchor(root, 'pair', 'src/b/two.ts::beta').status, 'ok',
+    "journey b's anchor must survive a run scoped to journey a")
+})
+
+// A bare schema path can live in a repo that hosts no hops. A full run has to look there
+// before it is entitled to call the schema missing.
+test('a full run searches registered repos that host no hops', () => {
+  const shared = join(root, 'shared-contracts')
+  mkdirSync(join(shared, 'src', 'schemas'), { recursive: true })
+  writeFileSync(join(shared, 'src', 'schemas', 'order.ts'), 'export const Order = { total: 0 }\n')
+  run(['init', '-q', '-b', 'main'], shared)
+  run(['add', '-A'], shared)
+  run(['-c', 'user.email=t@e.com', '-c', 'user.name=t', 'commit', '-qm', 'init'], shared)
+
+  const map = {
+    repos: { svc: { url: upstream, branch: 'main' }, shared: { url: shared, branch: 'main' } },
+    contracts: { order: { kind: 'event', schema: 'src/schemas/order.ts', fields: ['total'] } },
+    verified: {},
+    journeys: { flow: { hops: [{ repo: 'svc', reads: 'src/handler.ts::handleThing', outbound: 'order' }] } },
+  }
+  const mapPath = join(root, 'flowmap-shared.json')
+  writeFileSync(mapPath, JSON.stringify(map))
+
+  const result = verify(root, map, mapPath)
+  assert.deepEqual(result.contractIssues, [], 'the schema exists; it just lives in a hopless repo')
+})
+
+// A repo synced only so its schemas could be read has nothing to verify. Reporting it as
+// "skipped by scoping" told users a bare run was scoped and to re-run it bare.
+test('a schema-only repo is not reported as skipped by scoping', () => {
+  const shared = join(root, 'schemas-only')
+  mkdirSync(join(shared, 'src'), { recursive: true })
+  writeFileSync(join(shared, 'src', 'x.ts'), 'export const X = 1\n')
+  run(['init', '-q', '-b', 'main'], shared)
+  run(['add', '-A'], shared)
+  run(['-c', 'user.email=t@e.com', '-c', 'user.name=t', 'commit', '-qm', 'init'], shared)
+
+  const map = {
+    repos: { svc: { url: upstream, branch: 'main' }, shared: { url: shared, branch: 'main' } },
+    contracts: {},
+    verified: {},
+    journeys: { flow: { hops: [{ repo: 'svc', reads: 'src/handler.ts::handleThing' }] } },
+  }
+  const mapPath = join(root, 'flowmap-schemasonly2.json')
+  writeFileSync(mapPath, JSON.stringify(map))
+
+  const result = verify(root, map, mapPath)
+  assert.deepEqual(result.partial, [], 'a bare run is not a scoped run')
+  assert.equal(map.verified.shared, undefined, 'and nothing is vouched for there')
+})
