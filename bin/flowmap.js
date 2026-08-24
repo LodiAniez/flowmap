@@ -450,9 +450,12 @@ function verifyCmd(args, flags) {
 
   if (!result.checked) {
     throw new UserError(
-      `nothing to verify in that scope — no journey hop names ` +
-        (repoIds.length ? `repo(s) ${repoIds.join(', ')}` : 'those journeys') + `.\n` +
-        `A clean result here would mean nothing was checked.`,
+      (repoIds.length
+        ? `nothing to verify — no journey hop names repo(s) ${repoIds.join(', ')}.`
+        : requested.length
+          ? `nothing to verify — ${requested.join(', ')} has no anchored hops.`
+          : `nothing to verify — no journey in the map has a reads or writes anchor.`) +
+        `\nA clean result here would mean nothing was checked.`,
       EXIT_USAGE
     )
   }
@@ -496,11 +499,18 @@ function verifyCmd(args, flags) {
   } else {
     process.stdout.write(`\n  ${green('every anchor resolves.')}\n`)
   }
-  const suppressed = result.contracts.some((c) => c.status === 'schema-repo-not-synced')
-  if (result.contractsSuppressedBy?.length && suppressed) {
+  const suppressed = result.contracts.filter((c) => c.status === 'schema-repo-not-synced')
+  if (suppressed.length && result.contractsSuppressedReason) {
     process.stdout.write(
-      `  ${yellow('contract checks inconclusive:')} could not reach ${result.contractsSuppressedBy.join(', ')}\n` +
+      `  ${yellow(`${suppressed.length} contract(s) not checked:`)} ${result.contractsSuppressedReason}\n` +
         dim('  a schema absent from the repos we could read is not proof it is absent\n')
+    )
+  }
+  const ambiguous = result.contracts.filter((c) => c.status === 'schema-ambiguous')
+  for (const c of ambiguous) {
+    process.stdout.write(
+      `  ${yellow('ambiguous schema:')} ${c.id} — ${c.path} exists in ${c.repos.join(', ')}\n` +
+        dim('  qualify it as <repo>/<path> so the verdict is not a coin toss\n')
     )
   }
   if (result.contractIssues.length) {

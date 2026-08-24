@@ -371,3 +371,37 @@ test('a null contract entry does not crash the schema-repo scan', () => {
   writeFileSync(mapPath, JSON.stringify(map))
   assert.doesNotThrow(() => verify(root, map, mapPath, { journeys: ['flow'] }))
 })
+
+// A bare schema path can exist in several repos. Taking the first and reporting a confident
+// verdict from it decides the answer by registry ordering.
+test('a schema path present in two repos is reported ambiguous, not judged', async () => {
+  const { checkContract, AMBIGUOUS } = await import('../lib/contracts.js')
+  const a = join(root, '.flowmap-cache', 'repo-a')
+  const b = join(root, '.flowmap-cache', 'repo-b')
+  for (const d of [a, b]) mkdirSync(join(d, 'src', 'schemas'), { recursive: true })
+  writeFileSync(join(a, 'src', 'schemas', 'order.ts'), 'export const O = z.object({ total: 0 })\n')
+  writeFileSync(join(b, 'src', 'schemas', 'order.ts'), 'export const O = z.object({ different: 0 })\n')
+
+  const map = { repos: { 'repo-a': {}, 'repo-b': {} }, contracts: {}, journeys: {} }
+  const r = checkContract(root, map, 'order', { schema: 'src/schemas/order.ts', fields: ['total'] }, {})
+  assert.equal(r.status, AMBIGUOUS)
+  assert.deepEqual(r.repos.sort(), ['repo-a', 'repo-b'])
+})
+
+// The map must not be rewritten by a run the CLI then rejects as a usage error.
+test('a run that checked nothing does not rewrite the map', () => {
+  const map = {
+    repos: { svc: { url: upstream, branch: 'main' } },
+    contracts: {},
+    verified: {},
+    // A journey with no anchors: nothing to resolve, nothing to record.
+    journeys: { empty: { hops: [{ repo: 'svc' }] } },
+  }
+  const mapPath = join(root, 'flowmap-nothing.json')
+  const original = JSON.stringify(map)
+  writeFileSync(mapPath, original)
+
+  const result = verify(root, map, mapPath)
+  assert.equal(result.checked, 0)
+  assert.equal(readFileSync(mapPath, 'utf8'), original, 'the file on disk is untouched')
+})

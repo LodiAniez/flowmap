@@ -299,3 +299,38 @@ for (const [label, statement] of Object.entries(SPELLINGS)) {
     assert.equal(r.status, SCHEMA_OK, `${label}: the imported field must be found`)
   })
 }
+
+// A quote-free statement above a star re-export used to swallow the clause, so the star was
+// never seen and a wholesale-hidden package shape counted as contributing nothing.
+test('a statement above a star re-export does not swallow it', () => {
+  writeFileSync(join(repo, 'src', 'preamble.ts'),
+    "export const VERSION = 1\nexport * from '@acme/schemas'\n")
+  assert.equal(check({ schema: 'src/preamble.ts', fields: ['fromPkg'] }).status, INCONCLUSIVE)
+})
+
+// A file first read at the deepest level never had its own package imports judged, so a shape
+// composed from a package down there was reported as definitely missing.
+test('a package composed in at the deepest level is still seen', () => {
+  mkdirSync(join(repo, 'src', 'deep'), { recursive: true })
+  writeFileSync(join(repo, 'src', 'deep', 'c.ts'),
+    "import { Base } from '@acme/shared'\nexport const X = Base.extend({ own: 1 })\n")
+  writeFileSync(join(repo, 'src', 'deep', 'b.ts'), "export * from './c.js'\n")
+  writeFileSync(join(repo, 'src', 'deep', 'a.ts'), "export * from './b.js'\n")
+  writeFileSync(join(repo, 'src', 'deepentry.ts'), "export * from './deep/a.js'\n")
+  assert.equal(check({ schema: 'src/deepentry.ts', fields: ['fromBase'] }).status, INCONCLUSIVE)
+})
+
+// An import pointing at a file already read hides nothing, so it must not flip the verdict.
+test('a repeated import of an already-read file is not counted as unknown', () => {
+  mkdirSync(join(repo, 'src', 'shared2'), { recursive: true })
+  writeFileSync(join(repo, 'src', 'shared2', 'common.ts'), 'export const C = z.object({ shared: z.string() })\n')
+  writeFileSync(join(repo, 'src', 'shared2', 'leaf.ts'),
+    "import { C } from './common.js'\nexport const L = z.object({ leaf: z.string() })\n")
+  writeFileSync(join(repo, 'src', 'shared2', 'index.ts'),
+    "export * from './common.js'\nexport * from './leaf.js'\n")
+  writeFileSync(join(repo, 'src', 'dupentry.ts'), "export * from './shared2/index.js'\n")
+
+  const r = check({ schema: 'src/dupentry.ts', fields: ['shared', 'leaf', 'absent'] })
+  assert.equal(r.status, FIELDS_MISSING, 'everything was read, so absence is real')
+  assert.deepEqual(r.missing, ['absent'])
+})

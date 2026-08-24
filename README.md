@@ -324,6 +324,9 @@ name appears nowhere in its own schema is a strong signal, whatever the format:
       not found in the schema: order.discount
 ```
 
+A bare `schema` path that exists in more than one registered repo is reported **ambiguous**
+rather than judged against whichever repo came first — qualify it as `<repo>/<path>`.
+
 Schemas compose, so it follows relative imports three levels; searching only the named file
 would report `OrderSchema.omit(...)` fields as missing. Three is measured, not guessed: on a
 real contracts package, depth 2 gave a definite verdict on 3 of 7 contracts and depth 3 on 4
