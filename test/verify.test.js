@@ -690,4 +690,6 @@ test('a registry defect is not reported as a sync failure', () => {
 
   const result = verify(root, map, mapPath)
   assert.deepEqual(result.contractsStranded, [], 'not a sync failure')
+  assert.deepEqual(result.contractsOutOfScope, [], 'and there is no scope to be outside of')
+  assert.deepEqual(result.contractsUnregistered, ['c'], 'it is a registry defect')
 })

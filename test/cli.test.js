@@ -275,3 +275,24 @@ test('a bare numeric flag is rejected rather than read as 1', () => {
     assert.match(r.err, /needs a value/)
   }
 })
+
+// verifyCmd was hardened against inherited keys; the read commands were not, so `show journey
+// constructor` printed an empty journey and wrote a diagram file for it.
+test('read commands reject prototype keys as journey names', () => {
+  for (const key of ['constructor', 'toString', 'valueOf']) {
+    for (const cmd of ['show', 'journey']) {
+      const argv = cmd === 'show' ? ['show', 'journey', key] : ['journey', key]
+      const r = flowmap(...argv)
+      assert.notEqual(r.code, 0, `flowmap ${argv.join(' ')} must not succeed`)
+      assert.doesNotMatch(r.out, /0 hops/, 'and must not render an empty journey')
+    }
+  }
+})
+
+// A value flag given an empty value reached writeFileSync('') and died with ENOENT and exit 1,
+// where its sibling guards produce a usage error.
+test('an empty value on a path flag is a usage error', () => {
+  const r = flowmap('show', 'journey', 'checkout', '--out=')
+  assert.equal(r.code, 2)
+  assert.match(r.err, /needs a value/)
+})

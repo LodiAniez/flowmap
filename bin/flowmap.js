@@ -71,7 +71,7 @@ function narrowedHint(r) {
 const worthWarning = (r) => (r.narrowed && r.narrowedReason !== 'by-design') || r.staleOrigin
 
 function scopeFor(map, flags, purpose) {
-  requireValues(flags, ['repos', 'seed', 'max'])
+  requireValues(flags, ['repos', 'seed', 'max', 'out'])
   return resolveRepoIds(map, list(flags.repos), { all: flags.all === true, purpose })
 }
 
@@ -334,13 +334,16 @@ function checkJourney(feature, flags) {
 function showJourney(feature, flags) {
   if (!feature) throw new UserError('usage: flowmap show journey <feature>', EXIT_USAGE)
   const { map, root } = loadMap()
-  const accepted = map.journeys[feature]
+  // hasOwn, not bracket access: `journeys.constructor` is inherited, and `show journey
+  // constructor` otherwise printed an empty journey and wrote a diagram file for it.
+  const accepted = Object.hasOwn(map.journeys, feature) ? map.journeys[feature] : undefined
   const journey = accepted ?? loadDraft(root, feature).draft
   // Only a draft needs widening: verify's cone is built from the accepted journeys, so it
   // already covers this one's anchors. Widening anyway would disable sparse on every hop repo
   // for a read-only command.
   syncForJourney(root, map, journey, flags, { widen: !accepted })
 
+  requireValues(flags, ['out'])
   if (flags.mermaid === true) {
     process.stdout.write(mermaid(map, feature, journey) + '\n')
     return
@@ -408,7 +411,7 @@ function journeyCmd(args, flags) {
     return
   }
 
-  const j = resolveJourney(map, name)
+  const j = Object.hasOwn(map.journeys, name) ? resolveJourney(map, name) : null
   if (!j) {
     throw new UserError(
       `no journey "${name}"\nknown: ${Object.keys(map.journeys).join(', ') || '(none)'}`,
@@ -607,6 +610,12 @@ function verifyCmd(args, flags) {
       `  ${yellow(`${result.contractsStranded.length} contract(s) not checked:`)} carried only by hops in a repo that failed to sync\n`
     )
   }
+  if (result.contractsUnregistered?.length) {
+    process.stdout.write(
+      `  ${yellow(`${result.contractsUnregistered.length} contract(s) not checked:`)} carried only by hops in a repo the registry does not list\n` +
+        dim('  add it with `flowmap repo add`, or fix the hop\n')
+    )
+  }
   if (result.contractsOutOfScope?.length) {
     process.stdout.write(
       dim(`  ${result.contractsOutOfScope.length} contract(s) not checked: carried only by hops outside this run's scope\n`)
@@ -766,6 +775,7 @@ function repo(args, flags) {
       process.stderr.write(dim(`detected ${id} -> ${local.url}\n`))
     }
     if (!source) throw new UserError(`usage: flowmap repo add <id> <url-or-path>`, EXIT_USAGE)
+    requireValues(flags, ['branch'])
 
     const resolved = normalizeSource(source)
 

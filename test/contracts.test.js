@@ -402,3 +402,33 @@ test('a repo-qualified schema that is genuinely gone is reported even on a scope
   const bare = checkContractWith(map, { schema: 'src/deleted.ts', fields: ['x'] }, new Set(['svc']), true)
   assert.equal(bare.status, UNSEARCHED)
 })
+
+// The combinator branch matched the binding anywhere before the closing paren, so `z` matched
+// inside its own `z.union([z.string(), …])` and every schema using a union went inconclusive —
+// the sixth distinct way this check's definite verdict has been made unreachable.
+test('ordinary zod combinators do not hide a real verdict', () => {
+  const shapes = {
+    'plain': 'export const B = z.object({ id: z.string() })',
+    'union': 'export const B = z.object({ id: z.union([z.string(), z.number()]) })',
+    'or': 'export const B = z.object({ id: z.string() }).or(z.null())',
+    'discriminated': 'export const B = z.discriminatedUnion("k", [z.object({ id: z.string() })])',
+  }
+  for (const [label, body] of Object.entries(shapes)) {
+    const file = `src/combi-${label}.ts`
+    writeFileSync(join(repo, file), `import { z } from 'zod'\n${body}\n`)
+    assert.equal(check({ schema: file, fields: ['id', 'ghost'] }).status, FIELDS_MISSING,
+      `${label}: zod's own combinators are not a hidden shape`)
+  }
+})
+
+test('a package combined in by a combinator is still inconclusive', () => {
+  for (const [label, body] of Object.entries({
+    intersection: 'export const B = z.intersection(BaseOrder, z.object({ id: z.string() }))',
+    union: 'export const B = z.union([BaseOrder, z.object({ id: z.string() })])',
+  })) {
+    const file = `src/pkgcombi-${label}.ts`
+    writeFileSync(join(repo, file),
+      `import { z } from 'zod'\nimport { BaseOrder } from '@acme/shared'\n${body}\n`)
+    assert.equal(check({ schema: file, fields: ['id', 'fromBase'] }).status, INCONCLUSIVE, label)
+  }
+})
