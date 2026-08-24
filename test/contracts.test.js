@@ -377,3 +377,15 @@ test('the verdict does not depend on sibling visit order', () => {
   assert.equal(r.status, FIELDS_MISSING, 'the graph is fully read either way round')
   assert.deepEqual(r.missing, ['absent'])
 })
+
+// A plain lastIndexOf finds `import` inside an identifier, truncating the clause and dropping
+// the bindings before it — so the same statement gave a different verdict depending on what a
+// co-imported symbol happened to be called.
+test('a binding containing the word import or export does not hide the others', () => {
+  for (const other of ['helper', 'exportedHelper', 'importantThing', 'reimportCache']) {
+    writeFileSync(join(repo, 'src', `kw-${other}.ts`),
+      `import { BaseSchema, ${other} } from '@acme/contracts'\nexport const S = BaseSchema.extend({ own: 1 })\n`)
+    assert.equal(check({ schema: `src/kw-${other}.ts`, fields: ['total'] }).status, INCONCLUSIVE,
+      `co-import named ${other} must not drop BaseSchema`)
+  }
+})

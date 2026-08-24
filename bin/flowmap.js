@@ -443,7 +443,10 @@ function verifyCmd(args, flags) {
     // `--journey` with no value parses as `true`, list() yields [], and the run silently
     // widens to everything — the precise "the caller believes they scoped it" failure the
     // name validation below exists to prevent.
-    if (flags[flag] === true) {
+    // `--journey` bare parses as true; `--journey=` parses as an empty string. Both would
+    // otherwise widen the run to everything while the caller believes it is scoped.
+    const given = flags[flag]
+    if (given === true || (given !== undefined && list(given).length === 0)) {
       throw new UserError(`--${flag} needs a value`, EXIT_USAGE)
     }
   }
@@ -483,7 +486,12 @@ function verifyCmd(args, flags) {
 
   if (isAgentFormat(flags)) {
     // Only the problems: a clean anchor is not news, and the point is to stay cheap.
-    const rows = [...result.broken.map(verifyRow), ...contractRows(result.contractIssues)]
+    // Ambiguous and unsearched schemas are not "issues", but an agent still needs to know a
+    // verdict was a coin toss or never taken — silence reads as a clean result.
+    const notable = result.contracts.filter(
+      (c) => c.status === 'schema-ambiguous' || c.status === 'schema-repo-not-synced'
+    )
+    const rows = [...result.broken.map(verifyRow), ...contractRows([...result.contractIssues, ...notable])]
     if (rows.length) process.stdout.write(tsv(rows) + '\n')
     return
   }
@@ -517,7 +525,7 @@ function verifyCmd(args, flags) {
     process.stdout.write(
       dim('\n  The map is out of date, not the code. Fix the anchors, or re-draft the journey.\n')
     )
-  } else {
+  } else if (result.rows.length) {
     process.stdout.write(`\n  ${green('every anchor resolves.')}\n`)
   }
   const suppressed = result.contracts.filter((c) => c.status === 'schema-repo-not-synced')

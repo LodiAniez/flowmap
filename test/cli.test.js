@@ -158,3 +158,11 @@ test('no command exits non-zero for a finding', () => {
     assert.equal(r.code, 0, `flowmap ${argv.join(' ')} must not exit non-zero on a finding`)
   }
 })
+
+test('an empty scope flag value is rejected like a missing one', () => {
+  for (const arg of ['--journey=', '--repos=']) {
+    const r = flowmap('verify', arg)
+    assert.equal(r.code, 2, `${arg} must not silently widen the run`)
+    assert.match(r.err, /needs a value/)
+  }
+})

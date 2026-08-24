@@ -125,3 +125,29 @@ test('declining to widen still reports the checkout as narrowed', () => {
   const widened = syncRepo(root, 'svc-nosync', { url: up, branch: 'main' }, { mode: 'full', widen: true })
   assert.equal(widened.narrowed, false)
 })
+
+// Widening for search clears core.sparseCheckout, so reading that flag afterwards makes the
+// checkout look like one the user cloned in full — and verify then declines to re-narrow it,
+// permanently converting every blobless sparse clone into a full one.
+test('a checkout flowmap made sparse can be re-narrowed after being widened', () => {
+  const up = makeUpstream('svc-renarrow', {
+    'anchored/a.ts': 'export const a = 1\n',
+    'elsewhere/b.ts': 'export const b = 1\n',
+  })
+  syncRepo(root, 'svc-renarrow', { url: up, branch: 'main' }, { mode: 'sparse', paths: ['anchored'] })
+
+  const wide = syncRepo(root, 'svc-renarrow', { url: up, branch: 'main' }, { mode: 'full', widen: true })
+  assert.ok(existsSync(join(wide.dir, 'elsewhere', 'b.ts')), 'search sees the whole tree')
+
+  const narrow = syncRepo(root, 'svc-renarrow', { url: up, branch: 'main' }, { mode: 'sparse', paths: ['anchored'] })
+  assert.ok(!existsSync(join(narrow.dir, 'elsewhere', 'b.ts')),
+    'and verify gets its cone back rather than paying for a full checkout forever')
+})
+
+// A checkout the user cloned in full is still never narrowed.
+test('a full clone is still never narrowed', () => {
+  const up = makeUpstream('svc-userfull', { 'one/a.ts': 'export const a = 1\n', 'two/b.ts': 'export const b = 1\n' })
+  syncRepo(root, 'svc-userfull', { url: up, branch: 'main' }, { mode: 'full' })
+  const after = syncRepo(root, 'svc-userfull', { url: up, branch: 'main' }, { mode: 'sparse', paths: ['one'] })
+  assert.ok(existsSync(join(after.dir, 'two', 'b.ts')))
+})
