@@ -227,6 +227,22 @@ tool makes about someone else's code, and would relocate it whenever the journey
 Which repo owns a journey is a team decision, and running the command in that repo is how it
 gets expressed.
 
+**Contract fields are checked by grep, and follow imports before accusing.** `verify` also
+diffs a contract's declared fields against the file at its `schema` path: a field whose name
+appears nowhere in its own schema is a strong signal regardless of whether that schema is
+zod, JSON Schema, GraphQL SDL or a `.proto`. Same posture as anchor resolution — no
+per-language parser.
+
+The first version of this was worse than useless. Schemas compose, so
+`VelocityMembershipSchema.omit(...)` puts the field names one file away, and searching only
+the named file reported real contracts as broken. It now follows relative imports two levels.
+Where a schema *also* composes from a package it cannot read, the contract is reported
+inconclusive rather than failing: an unreadable dependency means "cannot tell", and dressing
+that up as "field is missing" is the confident-wrong-answer failure this tool exists to avoid.
+
+Only one direction is checked. A field declared but absent from the schema is a defect; a
+field in the schema but not declared is not, because a contract legitimately names a subset.
+
 **Symbol resolution is two-tier, not parsed.** Resolving `::symbolName` properly needs a
 parser per language, which is a large per-language investment. Instead: does the file exist
 (catches moves and deletes — most real drift), then does the symbol appear as a declaration

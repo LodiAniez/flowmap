@@ -13,7 +13,7 @@ import { resolveDefaultBranch, isRemoteUrl, HOW_LABEL } from '../lib/branch.js'
 import { renderJourney, acceptDraft, loadDraft } from '../lib/journey.js'
 import { mermaid, markdownDoc } from '../lib/diagram.js'
 import { journey as resolveJourney, impact as resolveImpact, journeyRow, impactRow } from '../lib/graph.js'
-import { verify as runVerify, verifyRow } from '../lib/verify.js'
+import { verify as runVerify, verifyRow, contractRows } from '../lib/verify.js'
 import { writeScaffold } from '../lib/scaffold.js'
 import { discover, repoRoot } from '../lib/discover.js'
 import { serve } from '../lib/server.js'
@@ -421,7 +421,8 @@ function verifyCmd(args, flags) {
 
   if (isAgentFormat(flags)) {
     // Only the problems: a clean anchor is not news, and the point is to stay cheap.
-    if (result.broken.length) process.stdout.write(tsv(result.broken.map(verifyRow)) + '\n')
+    const rows = [...result.broken.map(verifyRow), ...contractRows(result.contractIssues)]
+    if (rows.length) process.stdout.write(tsv(rows) + '\n')
     return
   }
 
@@ -458,6 +459,18 @@ function verifyCmd(args, flags) {
   } else {
     process.stdout.write(`\n  ${green('every anchor resolves.')}\n`)
   }
+  if (result.contractIssues.length) {
+    process.stdout.write(`\n  ${yellow(`${result.contractIssues.length} contract(s) disagree with their schema:`)}\n`)
+    for (const c of result.contractIssues) {
+      if (c.missing.length) {
+        process.stdout.write(`    ${cyan(c.id)} ${dim(`— ${c.path}`)}\n`)
+        process.stdout.write(`      ${red(`not found in the schema: ${c.missing.join(', ')}`)}\n`)
+      } else {
+        process.stdout.write(`    ${cyan(c.id)}  ${red(statusLabel(c.status) ?? c.status)} ${dim(c.ref ?? '')}\n`)
+      }
+    }
+  }
+
   if (result.partial.length) {
     process.stdout.write(
       `  ${yellow('scoped run — not recorded:')} ${result.partial.join(', ')}\n` +

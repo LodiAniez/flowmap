@@ -311,6 +311,21 @@ $ flowmap verify
 It syncs **sparse** — only the files the anchors name plus each contract's schema — so it
 pulls kilobytes per repo, not a clone. Roughly 8 seconds across three repos.
 
+It also checks each contract against the file at its `schema` path — a declared field whose
+name appears nowhere in its own schema is a strong signal, whatever the format:
+
+```
+  1 contract(s) disagree with their schema:
+    event.order.created — src/events/schemas/order.ts
+      not found in the schema: order.discount
+```
+
+Schemas compose, so it follows relative imports two levels; searching only the named file
+would report `OrderSchema.omit(...)` fields as missing. Where a schema also composes from a
+package it cannot read, the contract is reported **inconclusive** rather than failing —
+a flagged unknown beats a false alarm. A `schema` that names a package rather than a file, or
+is absent, is not a failure: there is simply nothing to check against.
+
 Afterwards `journey` and `impact` report `status: ok` instead of `unverified`, and the
 `verified` block in `flowmap.json` records the branch, sha, date and anchor tally per repo.
 
@@ -424,6 +439,9 @@ header. Cells never contain tabs or newlines.
 | `journey` | `hop`, `repo`, `inbound`, `outbound`, `reads`, `writes`, `status` |
 | `impact` | `journey`, `hop`, `repo`, `side`, `contract`, `field`, `reads`, `writes`, `status` |
 | `verify` | `repo`, `journey`, `hop`, `side`, `anchor`, `status`, `line` |
+
+Contract findings reuse the `verify` columns rather than adding new ones: `side` is `schema`
+and `anchor` carries `<contract>:<field>`.
 | `search` | `repo`, `path`, `line`, `text` |
 | `draft --check` | `hop`, `repo`, `side`, `anchor`, `status`, `line` |
 
