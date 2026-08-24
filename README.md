@@ -291,10 +291,10 @@ finalized checkout — 2 hops -> flowmap.json
 Refuses if an anchor does not resolve — data integrity, not gating; no build or merge is
 affected. `--force` overrides, `--keep-draft` keeps the file.
 
-### `flowmap verify`
+### `flowmap verify [<feature>]`
 
 Re-check every anchor in the map against the repos' current default branches, and record
-what was seen.
+what was seen. Name a feature to check just that journey.
 
 ```
 $ flowmap verify
@@ -322,8 +322,13 @@ resolved, the map is wrong"*.
 | --- | --- |
 | `--local` | only this repo's anchors — the PR-time scope, where every finding is something the author could have caused |
 | `--repos a,b` | scope to specific repos |
-| `--journey <name>` | scope to one journey |
+| `<feature>` or `--journey <name>` | scope to one journey — **reports but does not record**, see below |
 | `--format=agent` | tab-separated; **only the failures**, since a clean anchor is not news |
+
+**A scoped run does not update `verified`.** That record is per repo, but scoping to one
+journey resolves only that journey's anchors. Recording it would mark every *other* journey's
+hops in that repo as `ok` without having checked them, and would move the sha so the next run
+reports no drift. Scoped runs therefore report and stop; run `flowmap verify` bare to record.
 
 **It never fails.** Findings exit 0, like everything else here. A broken anchor means the
 map is out of date, not that someone's build should stop.
