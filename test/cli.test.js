@@ -194,3 +194,22 @@ test('show journey resolves anchors on a cold cache', () => {
   assert.doesNotMatch(r.out, /file not found/, 'the anchor exists and the tree must contain it')
   assert.match(r.out, /handleThing/)
 })
+
+// Contracts dropped before they were ever checked produce no `contracts` entry, so an agent
+// run that says nothing at all reads as a clean result.
+test('the agent format reports contracts it never checked', () => {
+  const scoped = join(root, 'agent-scope.json')
+  writeFileSync(scoped, JSON.stringify({
+    repos: { a: { url: repo, branch: 'main' }, b: { url: repo, branch: 'main' } },
+    contracts: { onB: { kind: 'event', schema: 'b/src/handler.ts', fields: [] } },
+    journeys: {
+      ja: { hops: [{ repo: 'a', reads: 'src/handler.ts::handleThing' }] },
+      jb: { hops: [{ repo: 'b', reads: 'src/handler.ts::handleThing', outbound: 'onB' }] },
+    },
+    verified: {},
+  }))
+  const r = flowmap('verify', '--repos', 'a', '--format=agent',
+    { mapPath: scoped, cache: join(root, '.cache-agentscope') })
+  assert.match(r.out, /onB/, 'silence here would read as a clean result')
+  assert.equal(r.code, 0)
+})

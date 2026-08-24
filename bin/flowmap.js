@@ -62,6 +62,10 @@ function narrowedHint(r) {
     : dim('  flowmap could not fetch the rest of it; retry when origin is reachable\n')
 }
 
+// A checkout left narrow because this caller had no reason to widen it is not a problem to
+// report — the cone already covers what it is about to read.
+const worthWarning = (r) => r.narrowed && r.narrowedReason !== 'by-design'
+
 function scopeFor(map, flags, purpose) {
   return resolveRepoIds(map, list(flags.repos), { all: flags.all === true, purpose })
 }
@@ -100,7 +104,7 @@ function syncForJourney(root, map, journey, flags, { widen = true } = {}) {
   // without paths clones with --sparse and never sets a cone, so the checkout holds only the
   // repo root and every anchor resolves as missing.
   const synced = ensureSynced(root, map, ids, flags, 'full', { widen })
-  for (const r of synced.filter((x) => x.narrowed)) {
+  for (const r of synced.filter(worthWarning)) {
     process.stderr.write(
       yellow(`warning: ${r.id} is a partial checkout — anchors there may report as missing\n`) + narrowedHint(r)
     )
@@ -200,7 +204,7 @@ function draftJourney(feature, flags) {
     force: flags.force === true,
   })
 
-  for (const r of synced.filter((x) => x.narrowed)) {
+  for (const r of synced.filter(worthWarning)) {
     process.stderr.write(yellow(`warning: ${r.id} is a partial checkout — candidates may be incomplete\n`) + narrowedHint(r))
   }
 
@@ -510,7 +514,16 @@ function verifyCmd(args, flags) {
     const notable = result.contracts.filter(
       (c) => c.status === 'schema-ambiguous' || c.status === 'schema-repo-not-synced'
     )
-    const rows = [...result.broken.map(verifyRow), ...contractRows([...result.contractIssues, ...notable])]
+    // Contracts dropped before they were ever checked produce no `contracts` entry at all, so
+    // without these the agent sees an empty result and reads it as clean.
+    const skipped = [
+      ...(result.contractsStranded ?? []).map((id) => ({ id, status: 'repo-unreachable', missing: [] })),
+      ...(result.contractsOutOfScope ?? []).map((id) => ({ id, status: 'out-of-scope', missing: [] })),
+    ]
+    const rows = [
+      ...result.broken.map(verifyRow),
+      ...contractRows([...result.contractIssues, ...notable, ...skipped]),
+    ]
     if (rows.length) process.stdout.write(tsv(rows) + '\n')
     return
   }
@@ -545,6 +558,11 @@ function verifyCmd(args, flags) {
   if (result.contractsStranded?.length) {
     process.stdout.write(
       `  ${yellow(`${result.contractsStranded.length} contract(s) not checked:`)} carried only by hops in a repo that failed to sync\n`
+    )
+  }
+  if (result.contractsOutOfScope?.length) {
+    process.stdout.write(
+      dim(`  ${result.contractsOutOfScope.length} contract(s) not checked: carried only by hops outside this run's scope\n`)
     )
   }
   if (result.broken.length) {
@@ -760,7 +778,7 @@ function search(args, flags) {
   const max = Number(flags.max) > 0 ? Number(flags.max) : 50
   const results = searchRepos(root, ids, needle, { max, ignoreCase: flags.i === true })
 
-  for (const s of synced.filter((r) => r.narrowed)) {
+  for (const s of synced.filter(worthWarning)) {
     process.stderr.write(yellow(`warning: ${s.id} is a partial checkout — results may be incomplete\n`) + narrowedHint(s))
   }
 

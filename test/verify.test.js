@@ -537,3 +537,30 @@ test('verify reads pending drafts when deciding what is unused', () => {
   const result = verify(root, map, mapPath)
   assert.deepEqual(result.unusedRepos, [], 'the drafted repo is in use by a pending draft')
 })
+
+// A repo outside this run's scope did not fail. Reporting the two the same way made every
+// scoped run — the documented PR-time path — look like a broken sync.
+test('a contract outside the run scope is distinguished from one whose repo failed', () => {
+  const other = join(root, 'scope-other')
+  mkdirSync(join(other, 'src'), { recursive: true })
+  writeFileSync(join(other, 'src', 'x.ts'), 'export const x = 1\n')
+  run(['init', '-q', '-b', 'main'], other)
+  run(['add', '-A'], other)
+  run(['-c', 'user.email=t@e.com', '-c', 'user.name=t', 'commit', '-qm', 'init'], other)
+
+  const map = {
+    repos: { a: { url: upstream, branch: 'main' }, b: { url: other, branch: 'main' } },
+    contracts: { onB: { kind: 'event', schema: 'b/src/x.ts', fields: [] } },
+    verified: {},
+    journeys: {
+      ja: { hops: [{ repo: 'a', reads: 'src/handler.ts::handleThing' }] },
+      jb: { hops: [{ repo: 'b', reads: 'src/x.ts::x', outbound: 'onB' }] },
+    },
+  }
+  const mapPath = join(root, 'flowmap-scope-split.json')
+  writeFileSync(mapPath, JSON.stringify(map))
+
+  const result = verify(root, map, mapPath, { repoIds: ['a'] })
+  assert.deepEqual(result.contractsStranded, [], 'nothing failed to sync')
+  assert.deepEqual(result.contractsOutOfScope, ['onB'], 'it was simply not in scope')
+})

@@ -151,3 +151,16 @@ test('a full clone is still never narrowed', () => {
   const after = syncRepo(root, 'svc-userfull', { url: up, branch: 'main' }, { mode: 'sparse', paths: ['one'] })
   assert.ok(existsSync(join(after.dir, 'two', 'b.ts')))
 })
+
+// A caller that had no reason to widen is not a problem to report. Blaming --no-sync for it
+// fired the warning on the most common read command and pointed at a flag nobody passed.
+test('declining to widen by choice is distinguished from --no-sync declining', () => {
+  const up = makeUpstream('svc-reason', { 'a/one.ts': 'export const a = 1\n', 'b/two.ts': 'export const b = 1\n' })
+  syncRepo(root, 'svc-reason', { url: up, branch: 'main' }, { mode: 'sparse', paths: ['a'] })
+
+  const byDesign = syncRepo(root, 'svc-reason', { url: up, branch: 'main' }, { mode: 'full', widen: false })
+  assert.equal(byDesign.narrowedReason, 'by-design', 'the caller simply did not need the rest')
+
+  const offline = syncRepo(root, 'svc-reason', { url: up, branch: 'main' }, { mode: 'full', widen: false, offline: true })
+  assert.equal(offline.narrowedReason, 'declined', '--no-sync is a different story')
+})
