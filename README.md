@@ -338,7 +338,7 @@ resolved, the map is wrong"*.
 | `--local` | only this repo's anchors — the PR-time scope, where every finding is something the author could have caused |
 | `--repos a,b` | scope to specific repos |
 | `<feature>` or `--journey <name>` | scope to one journey — **reports but does not record**, see below |
-| `--format=agent` | tab-separated; **only the failures**, since a clean anchor is not news |
+| `--format=agent` | tab-separated; only anchors and contracts that need attention — a clean one is not news. Read the `status` column: `schema-inconclusive` means *could not tell*, not *broken* |
 
 **A scoped run does not update `verified`.** That record is per repo, but scoping to one
 journey resolves only that journey's anchors. Recording it would mark every *other* journey's
@@ -452,7 +452,9 @@ header. Cells never contain tabs or newlines.
 | `draft --check` | `hop`, `repo`, `side`, `anchor`, `status`, `line` |
 
 Contract findings reuse the `verify` columns rather than adding new ones: `side` is `schema`
-and `anchor` carries `<contract>:<field>`.
+and `anchor` carries `<contract>:<field>`. Their `status` distinguishes `field-missing` (the
+schema really does not declare it) from `schema-inconclusive` (the schema composes from
+something flowmap could not read) — never treat the second as a defect.
 
 A missing value renders as `-`, never as an empty cell, so columns never shift.
 

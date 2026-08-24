@@ -96,7 +96,19 @@ test('a sparse checkout is widened before a full-mode command uses it', () => {
   assert.ok(!existsSync(narrowed), 'starts narrowed')
 
   // No refresh flag: reconciliation must happen on plain reuse, which is how search calls it.
-  const after = syncRepo(root, 'svc-widen', { url: up, branch: 'main' }, { mode: 'full' })
+  const after = syncRepo(root, 'svc-widen', { url: up, branch: 'main' }, { mode: 'full', widen: true })
   assert.ok(existsSync(join(after.dir, 'elsewhere', 'b.ts')),
     'search must not grep a truncated tree and call the result complete')
+})
+
+// Widening is for the commands that grep. Doing it for every full-mode sync would materialise
+// whole repos on a blobless clone and permanently cost verify its sparse checkout.
+test('a full-mode sync that does not grep leaves the cone alone', () => {
+  const up = makeUpstream('svc-keepcone', {
+    'anchored/a.ts': 'export const a = 1\n',
+    'elsewhere/b.ts': 'export const b = 1\n',
+  })
+  syncRepo(root, 'svc-keepcone', { url: up, branch: 'main' }, { mode: 'sparse', paths: ['anchored'] })
+  const after = syncRepo(root, 'svc-keepcone', { url: up, branch: 'main' }, { mode: 'full' })
+  assert.ok(!existsSync(join(after.dir, 'elsewhere', 'b.ts')), 'the cone survives')
 })

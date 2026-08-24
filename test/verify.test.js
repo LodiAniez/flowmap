@@ -191,3 +191,31 @@ test('a run where every repo is unreachable reports itself as not recorded', () 
   assert.deepEqual(result.partial, ['svc'], 'an errored repo counts as not recorded')
   assert.equal(map.verified.svc, undefined)
 })
+
+// A repeated name pushed every anchor twice, so the scoped count exceeded the full count and
+// coverage came out true — recording a run that had checked one journey and vouching for all.
+test('a repeated journey name does not fake full coverage', () => {
+  const map = freshMap()
+  map.journeys.other = { hops: [{ repo: 'svc', reads: 'src/handler.ts::doesNotExist' }] }
+  const mapPath = join(root, 'flowmap-dupe.json')
+  writeFileSync(mapPath, JSON.stringify(map))
+
+  const result = verify(root, map, mapPath, { journeys: ['flow', 'flow'] })
+  assert.deepEqual(result.partial, ['svc'], 'still a partial run')
+  assert.equal(map.verified.svc, undefined, 'and still records nothing')
+  assert.equal(result.broken.length, 0, 'nor double-counts anchors')
+})
+
+// A repo synced only for its schemas has no anchors; `0 >= 0` would record it on a scoped run.
+test('a schema-only repo is not recorded by a scoped run', async () => {
+  const { checkContracts } = await import('../lib/contracts.js')
+  void checkContracts
+  const map = freshMap()
+  map.repos.contracts = { url: upstream, branch: 'main' }
+  map.contracts = { c: { schema: 'contracts/src/handler.ts', fields: [] } }
+  const mapPath = join(root, 'flowmap-schemaonly.json')
+  writeFileSync(mapPath, JSON.stringify(map))
+
+  verify(root, map, mapPath, { journeys: ['flow'] })
+  assert.equal(map.verified.contracts, undefined, 'a scoped run vouches for nothing')
+})

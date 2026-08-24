@@ -58,7 +58,7 @@ function scopeFor(map, flags, purpose) {
   return resolveRepoIds(map, list(flags.repos), { all: flags.all === true, purpose })
 }
 
-function ensureSynced(root, map, ids, flags, mode = 'full') {
+function ensureSynced(root, map, ids, flags, mode = 'full', { widen = false } = {}) {
   const missing = ids.filter((id) => !isSynced(root, id))
   if (missing.length && flags['no-sync'] === true) {
     throw new UserError(`not synced: ${missing.join(', ')}\nDrop --no-sync or run \`flowmap sync\`.`)
@@ -66,7 +66,7 @@ function ensureSynced(root, map, ids, flags, mode = 'full') {
   if (missing.length) {
     process.stderr.write(dim(`syncing ${missing.length} repo(s): ${missing.join(', ')}\n`))
   }
-  return syncMany(root, map, ids, { mode, refresh: flags.refresh === true })
+  return syncMany(root, map, ids, { mode, widen, refresh: flags.refresh === true })
 }
 
 // Anchors can only be resolved against real checkouts, so any command that resolves them
@@ -154,7 +154,7 @@ function draftJourney(feature, flags) {
   const { map, root } = ctx
 
   const ids = scopeFor(map, flags, 'drafting')
-  const synced = ensureSynced(root, map, ids, flags)
+  const synced = ensureSynced(root, map, ids, flags, 'full', { widen: true })
   const seeds = list(flags.seed)
 
   // The draft file is the deliverable, not the brief. Everything deterministic is resolved
@@ -386,7 +386,9 @@ function verifyCmd(args, flags) {
   // Validate every spelling, positional and flag alike. An unrecognised name would otherwise
   // resolve to zero anchors and print "every anchor resolves" — a clean bill of health for
   // nothing checked, which is worse than an error.
-  const requested = [...named, ...list(flags.journey)]
+  // Deduped: a repeated name (`verify flow --journey flow`) would push each anchor twice,
+  // inflating the scoped count past the full one so `covers()` wrongly reports full coverage.
+  const requested = [...new Set([...named, ...list(flags.journey)])]
   for (const name of requested) {
     // hasOwn, not truthiness: `journeys.constructor` is inherited and would pass.
     if (!Object.hasOwn(map.journeys, name)) {
@@ -482,14 +484,24 @@ function verifyCmd(args, flags) {
     }
   }
 
-  if (result.partial.length) {
+  // A repo that failed to sync and a repo skipped by scoping both went unrecorded, but the
+  // advice differs — telling someone to "run it bare" when they just did is worse than silent.
+  const failed = result.repos.filter((r) => r.error).map((r) => r.id)
+  const skipped = result.partial.filter((id) => !failed.includes(id))
+  const recorded = result.repos.filter((r) => r.recorded).map((r) => r.id)
+
+  if (recorded.length) {
+    process.stdout.write(dim(`  recorded ${recorded.length} repo(s) in ${display(root, path)}\n`))
+  }
+  if (skipped.length) {
     process.stdout.write(
-      `  ${yellow('scoped run — not recorded:')} ${result.partial.join(', ')}\n` +
+      `  ${yellow('scoped run — not recorded:')} ${skipped.join(', ')}\n` +
         dim('  Verification is tracked per repo, so a partial run cannot mark one verified\n') +
         dim('  without vouching for journeys it never checked. Run `flowmap verify` bare.\n')
     )
-  } else {
-    process.stdout.write(dim(`  recorded in ${display(root, path)} under "verified"\n`))
+  }
+  if (failed.length && !recorded.length && !skipped.length) {
+    process.stdout.write(dim(`  nothing recorded — no repo could be reached\n`))
   }
   // Findings never exit non-zero. See DESIGN.md "Advisory only. Never a gate."
 }
@@ -625,7 +637,7 @@ function search(args, flags) {
 
   const { map, root } = loadMap()
   const ids = scopeFor(map, flags, 'search')
-  ensureSynced(root, map, ids, flags)
+  ensureSynced(root, map, ids, flags, 'full', { widen: true })
 
   const max = Number(flags.max) > 0 ? Number(flags.max) : 50
   const results = searchRepos(root, ids, needle, { max, ignoreCase: flags.i === true })

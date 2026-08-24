@@ -100,16 +100,23 @@ test('a side-effect import is followed, since a schema file can arrive that way'
 // "We searched and it is not there" and "we never looked" are different claims, and only the
 // first is a finding. But over-applying the second made a genuine missing schema unreportable
 // as soon as one unsynced repo existed anywhere in the registry.
-test('searching a repo and not finding the schema is a finding', () => {
-  const wider = { repos: { svc: {}, other: {} }, contracts: {}, journeys: {} }
-  const r = checkContractWith(wider, { schema: 'src/nowhere.ts', fields: ['x'] }, new Set(['svc']))
-  assert.equal(r.status, SCHEMA_NOT_FOUND, 'svc was searched; absence there is real')
+test('searching every candidate repo and not finding the schema is a finding', () => {
+  const only = { repos: { svc: {} }, contracts: {}, journeys: {} }
+  const r = checkContractWith(only, { schema: 'src/nowhere.ts', fields: ['x'] }, new Set(['svc']))
+  assert.equal(r.status, SCHEMA_NOT_FOUND, 'nothing was left unsearched, so absence is real')
 })
 
-test('having searched nothing at all is unsearched, not missing', () => {
+// The --local / --repos case: some repos synced, but not the one that owns the schema.
+test('leaving a candidate repo unsearched is unsearched, not missing', () => {
   const wider = { repos: { svc: {}, other: {} }, contracts: {}, journeys: {} }
-  const r = checkContractWith(wider, { schema: 'src/nowhere.ts', fields: ['x'] }, new Set())
-  assert.equal(r.status, UNSEARCHED)
+  const r = checkContractWith(wider, { schema: 'src/nowhere.ts', fields: ['x'] }, new Set(['svc']))
+  assert.equal(r.status, UNSEARCHED, 'other was never looked in')
+})
+
+test('a repo-qualified ref is judged only against that repo', () => {
+  const wider = { repos: { svc: {}, other: {} }, contracts: {}, journeys: {} }
+  const found = checkContractWith(wider, { schema: 'svc/src/standalone.ts', fields: ['alpha'] }, new Set(['svc']))
+  assert.equal(found.status, SCHEMA_OK, 'other being unsynced is irrelevant here')
 })
 
 // `import { z } from 'zod'` does not hide any part of the shape, but treating every package
