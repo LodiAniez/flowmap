@@ -242,3 +242,40 @@ test('a star re-export from a package is still inconclusive', () => {
   writeFileSync(join(repo, 'src', 'starre.ts'), "export * from '@acme/shared'\n")
   assert.equal(check({ schema: 'src/starre.ts', fields: ['anything'] }).status, c.INCONCLUSIVE)
 })
+
+// The sparse cone and the import walk are two constants that must agree. When the cone was
+// shallower than the walk, the checker read files that had never been fetched and every deep
+// schema came back "could not tell" — with the whole suite green, because no test built a
+// chain as deep as the walk and ran a real verify over it.
+test('the cone reaches as deep as the import walk', async () => {
+  const { verify } = await import('../lib/verify.js')
+  const { IMPORT_DEPTH } = await import('../lib/contracts.js')
+
+  // Each level in its own directory, so every hop needs the cone to widen again.
+  const files = { 'src/api/handler.ts': 'export function handle() {}\n' }
+  files[`src/lvl${IMPORT_DEPTH}/leaf.ts`] = 'export const Leaf = z.object({ deepest: z.string() })\n'
+  for (let i = IMPORT_DEPTH - 1; i >= 1; i--) {
+    files[`src/lvl${i}/mod.ts`] = `export * from '../lvl${i + 1}/leaf.js'\n`
+  }
+  // The level below the entry re-exports from the next directory down.
+  files['src/schemas/order.ts'] = "export * from '../lvl1/mod.js'\n"
+  if (IMPORT_DEPTH > 1) {
+    files[`src/lvl1/mod.ts`] = `export * from '../lvl2/${IMPORT_DEPTH === 2 ? 'leaf' : 'mod'}.js'\n`
+  }
+
+  const up = realRepo('deepcone', files)
+  const map = {
+    repos: { deepcone: { url: up, branch: 'main' } },
+    contracts: { order: { kind: 'event', schema: 'src/schemas/order.ts', fields: ['deepest', 'absent'] } },
+    journeys: { flow: { hops: [{ repo: 'deepcone', reads: 'src/api/handler.ts::handle', outbound: 'order' }] } },
+    verified: {},
+  }
+  const mapPath = join(root, 'flowmap-deepcone.json')
+  writeFileSync(mapPath, JSON.stringify(map))
+
+  const r = verify(root, map, mapPath)
+  const order = r.contracts.find((x) => x.id === 'order')
+  assert.equal(order.status, c.FIELDS_MISSING,
+    'a chain the walk can follow must also be a chain the cone fetched')
+  assert.deepEqual(order.missing, ['absent'], 'the deepest field must have been reachable')
+})

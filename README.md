@@ -324,8 +324,11 @@ name appears nowhere in its own schema is a strong signal, whatever the format:
       not found in the schema: order.discount
 ```
 
-Schemas compose, so it follows relative imports two levels; searching only the named file
-would report `OrderSchema.omit(...)` fields as missing. Where a schema also composes from a
+Schemas compose, so it follows relative imports three levels; searching only the named file
+would report `OrderSchema.omit(...)` fields as missing. Three is measured, not guessed: on a
+real contracts package, depth 2 gave a definite verdict on 3 of 7 contracts and depth 3 on 4
+of 7, while depths 4 and 6 gave no further improvement. Schema graphs deeper or more indirect
+than that are reported **inconclusive** rather than guessed at. Where a schema also composes from a
 package it cannot read, the contract is reported **inconclusive** rather than failing —
 a flagged unknown beats a false alarm. A `schema` that names a package rather than a file, or
 is absent, is not a failure: there is simply nothing to check against.

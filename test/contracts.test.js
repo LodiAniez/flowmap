@@ -23,7 +23,7 @@ writeFileSync(join(repo, 'src', 'external.ts'),
   "import { Base } from '@acme/shared-schemas'\nexport const Ext = Base.extend({ local: z.string() })\n")
 
 process.env.FLOWMAP_CACHE = join(root, '.flowmap-cache')
-const { checkContract, parseSchemaRef, SCHEMA_OK, FIELDS_MISSING, SCHEMA_NOT_FOUND, NOT_A_PATH, NO_SCHEMA, INCONCLUSIVE, UNSEARCHED } =
+const { checkContract, parseSchemaRef, IMPORT_DEPTH, SCHEMA_OK, FIELDS_MISSING, SCHEMA_NOT_FOUND, NOT_A_PATH, NO_SCHEMA, INCONCLUSIVE, UNSEARCHED } =
   await import('../lib/contracts.js')
 
 const map = { repos: { svc: {} }, contracts: {}, journeys: {} }
@@ -176,12 +176,30 @@ test('re-exports are followed, not just imports', () => {
 })
 
 test('depth exhaustion with files still unexplored is inconclusive', () => {
-  // three levels of relative hops, one more than the follower goes
-  writeFileSync(join(repo, 'src', 'd3.ts'), 'export const Deep = z.object({ buried: z.string() })\n')
-  writeFileSync(join(repo, 'src', 'd2.ts'), "export * from './d3.js'\n")
-  writeFileSync(join(repo, 'src', 'd1.ts'), "export * from './d2.js'\n")
+  // A chain one hop longer than the follower goes, built from IMPORT_DEPTH rather than a
+  // hardcoded length — otherwise this silently stops testing exhaustion the next time the
+  // depth changes, which is exactly what happened when it went from 2 to 3.
+  const levels = IMPORT_DEPTH + 1
+  writeFileSync(join(repo, 'src', `d${levels}.ts`), 'export const Deep = z.object({ buried: z.string() })\n')
+  for (let i = levels - 1; i >= 1; i--) {
+    writeFileSync(join(repo, 'src', `d${i}.ts`), `export * from './d${i + 1}.js'\n`)
+  }
   writeFileSync(join(repo, 'src', 'd0.ts'), "import './d1.js'\nexport const S = z.object({ own: z.string() })\n")
-  assert.equal(check({ schema: 'src/d0.ts', fields: ['own', 'buried'] }).status, INCONCLUSIVE)
+
+  assert.equal(check({ schema: 'src/d0.ts', fields: ['own', 'buried'] }).status, INCONCLUSIVE,
+    'the buried field sits beyond the walk, so the answer is not knowable')
+})
+
+test('a chain exactly as deep as the walk still yields a definite verdict', () => {
+  writeFileSync(join(repo, 'src', `e${IMPORT_DEPTH}.ts`), 'export const Leaf = z.object({ reached: z.string() })\n')
+  for (let i = IMPORT_DEPTH - 1; i >= 1; i--) {
+    writeFileSync(join(repo, 'src', `e${i}.ts`), `export * from './e${i + 1}.js'\n`)
+  }
+  writeFileSync(join(repo, 'src', 'e0.ts'), "import './e1.js'\nexport const S = z.object({ own: z.string() })\n")
+
+  const r = check({ schema: 'src/e0.ts', fields: ['own', 'reached', 'absent'] })
+  assert.equal(r.status, FIELDS_MISSING, 'everything was read, so absence is real')
+  assert.deepEqual(r.missing, ['absent'])
 })
 
 // A malformed map should surface as an error the CLI can explain, not a raw TypeError.
