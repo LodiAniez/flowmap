@@ -312,9 +312,10 @@ It syncs **sparse**, one pass per import level: the directories the anchors and 
 then — after reading what landed — exactly the directories those schemas import from, repeated
 until the walk depth is covered. Measured across ten
 real repos that is 17MB and 1–17% of each large repo, against 96MB if the cone is simply
-widened to the top-level directory. A *full* run also touches every registered repo, because
-only a full run is entitled to say a schema exists nowhere; a scoped run stays within its
-scope.
+widened to the top-level directory. A full run also touches every registered repo — but only when it has to: when some contract
+names a schema by a bare path (no `<repo>/` prefix) and the registry is small enough to sweep.
+Where every schema ref names its own repo, or the registry is large, only those repos are
+fetched, and a "schema exists nowhere" verdict is withheld rather than guessed.
 
 It also checks each contract against the file at its `schema` path — a declared field whose
 name appears nowhere in its own schema is a strong signal, whatever the format:

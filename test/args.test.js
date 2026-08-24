@@ -60,3 +60,14 @@ test('a repeated boolean flag stays true', () => {
 test('a repeated value flag still collects', () => {
   assert.deepEqual(list(parseArgs(['--seed', 'a', '--seed', 'b']).flags.seed), ['a', 'b'])
 })
+
+// Every consumer tests `flags.x === true`, so a boolean arriving as the string 'true' reads as
+// false and the run silently widens — the failure BOOLEAN_FLAGS exists to prevent.
+test('an explicit value on a boolean flag still yields a boolean', () => {
+  for (const on of ['true', 'yes', '1', 'on']) {
+    assert.equal(parseArgs([`--local=${on}`]).flags.local, true, `--local=${on}`)
+  }
+  for (const off of ['false', 'no', '0', 'off']) {
+    assert.equal(parseArgs([`--local=${off}`]).flags.local, false, `--local=${off}`)
+  }
+})

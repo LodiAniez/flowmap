@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { execFileSync, spawnSync, execFileSync as run } from 'node:child_process'
-import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, writeFileSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -228,4 +228,16 @@ test('a valueless scope flag is rejected on every command that scopes', () => {
     assert.equal(r.code, 2, `flowmap ${argv.join(' ')} must not silently widen`)
     assert.match(r.err, /needs a value/)
   }
+})
+
+// autoSetup creates flowmap.json, edits .git/info/exclude, runs discovery and makes a network
+// round trip per repo. Rejecting an argument after all that is a bad way to reject an argument.
+test('draft journey validates its flags before doing anything', () => {
+  const fresh = join(root, 'fresh-draft')
+  mkdirSync(fresh, { recursive: true })
+  const r = flowmap('draft', 'journey', 'checkout', '--repos',
+    { mapPath: join(fresh, 'flowmap.json'), cache: join(fresh, '.cache') })
+  assert.equal(r.code, 2)
+  assert.match(r.err, /needs a value/)
+  assert.ok(!existsSync(join(fresh, 'flowmap.json')), 'and nothing was created first')
 })

@@ -565,9 +565,10 @@ test('a contract outside the run scope is distinguished from one whose repo fail
   assert.deepEqual(result.contractsOutOfScope, ['onB'], 'it was simply not in scope')
 })
 
-// An orphan contract — in the map but carried by no hop — is never checked by any run, so
-// waiting for it to resolve made the unused-repo report unreachable.
-test('an orphan contract does not disable the unused-repo report', () => {
+// An orphan bare-path contract is never checked by any run, so the repo holding its schema is
+// unaccounted for and no repo can safely be called unused. The report is withheld — but the
+// reason is stated, which is what makes the silence acceptable rather than a dead feature.
+test('an orphan bare-path contract withholds the report, with a reason', () => {
   const spare = join(root, 'orphan-spare')
   mkdirSync(join(spare, 'src'), { recursive: true })
   writeFileSync(join(spare, 'src', 'x.ts'), 'export const x = 1\n')
@@ -586,8 +587,31 @@ test('an orphan contract does not disable the unused-repo report', () => {
   writeFileSync(mapPath, JSON.stringify(map))
 
   const result = verify(root, map, mapPath)
-  assert.deepEqual(result.unusedRepos, ['nobody'],
-    'an orphan must not permanently silence the report')
+  assert.deepEqual(result.unusedRepos, [], 'the holding repo is unaccounted for')
+  assert.match(result.unusedReposUnavailable, /leftover/, 'and the caller is told which contract')
+})
+
+// With no orphan in the way, the report still works.
+test('the unused-repo report fires when every bare path resolved', () => {
+  const spare = join(root, 'clean-spare')
+  mkdirSync(join(spare, 'src'), { recursive: true })
+  writeFileSync(join(spare, 'src', 'x.ts'), 'export const x = 1\n')
+  run(['init', '-q', '-b', 'main'], spare)
+  run(['add', '-A'], spare)
+  run(['-c', 'user.email=t@e.com', '-c', 'user.name=t', 'commit', '-qm', 'init'], spare)
+
+  const map = {
+    repos: { svc: { url: upstream, branch: 'main' }, nobody: { url: spare, branch: 'main' } },
+    contracts: {},
+    verified: {},
+    journeys: { flow: { hops: [{ repo: 'svc', reads: 'src/handler.ts::handleThing' }] } },
+  }
+  const mapPath = join(root, 'flowmap-clean-unused.json')
+  writeFileSync(mapPath, JSON.stringify(map))
+
+  const result = verify(root, map, mapPath)
+  assert.equal(result.unusedReposUnavailable, null)
+  assert.deepEqual(result.unusedRepos, ['nobody'])
 })
 
 // `--local` resolves against the repo flowmap.json lives in; advising its removal makes the
@@ -601,4 +625,31 @@ test('the self-registered repo is never reported as unused', async () => {
   }
   assert.deepEqual(unusedRepos(map), ['ctx'], 'without knowing, it looks unused')
   assert.deepEqual(unusedRepos(map, { self: 'ctx' }), [], 'but --local depends on it')
+})
+
+// An orphan contract is never checked, so it must not count towards the completeness gate
+// either — counting it let the gate pass with the holding repo unlocated, and the report then
+// named that repo as safe to delete.
+test('an orphan bare-path contract cannot make a live repo look removable', async () => {
+  const { unusedRepos } = await import('../lib/verify.js')
+  const map = {
+    repos: { app: {}, contractspkg: {} },
+    contracts: { 'legacy.order': { schema: 'src/schemas/order.ts', fields: [] } },
+    journeys: { flow: { hops: [{ repo: 'app', reads: 'a.ts::b' }] } },
+  }
+  // The orphan was never resolved, so nothing here is known about contractspkg.
+  assert.deepEqual(unusedRepos(map, { foundIn: [], bareResolved: false }), [],
+    'an unresolved orphan must not license the claim')
+})
+
+test('verify tolerates a map with no verified block', () => {
+  const map = {
+    repos: { svc: { url: upstream, branch: 'main' } },
+    contracts: {},
+    journeys: { flow: { hops: [{ repo: 'svc', reads: 'src/handler.ts::handleThing' }] } },
+  }
+  const mapPath = join(root, 'flowmap-noverified.json')
+  writeFileSync(mapPath, JSON.stringify(map))
+  assert.doesNotThrow(() => verify(root, map, mapPath))
+  assert.ok(map.verified.svc)
 })

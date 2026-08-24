@@ -212,6 +212,10 @@ function autoSetup(feature, flags) {
 
 function draftJourney(feature, flags) {
   if (!feature) throw new UserError('usage: flowmap draft journey <feature>', EXIT_USAGE)
+  // Before autoSetup: it creates flowmap.json, edits .git/info/exclude, runs discovery and
+  // makes a network round trip per repo. Aborting after all that is a bad way to reject an
+  // argument we could have rejected immediately.
+  requireValues(flags, ['repos', 'seed', 'from'])
 
   const ctx = autoSetup(feature, flags) ?? loadMap()
   const { map, root } = ctx
@@ -613,6 +617,11 @@ function verifyCmd(args, flags) {
     process.stdout.write(
       `  ${yellow(`${suppressed.length} contract(s) not checked:`)} ${result.contractsSuppressedReason}\n` +
         dim('  a schema absent from the repos we could read is not proof it is absent\n')
+    )
+  }
+  if (result.unusedReposUnavailable) {
+    process.stdout.write(
+      dim(`  cannot tell which registered repos are unused: ${result.unusedReposUnavailable}\n`)
     )
   }
   if (result.unusedRepos?.length) {
