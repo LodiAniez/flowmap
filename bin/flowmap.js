@@ -574,7 +574,21 @@ function verifyCmd(args, flags) {
     self: localRepoId(map),
   })
 
+  // Built before the early return: an agent run that checked nothing still has to say so, and
+  // returning ahead of this branch wrote nothing at all to stdout.
+  const skippedRows = () =>
+    contractRows([
+      ...(result.contractsStranded ?? []).map((id) => ({ id, status: 'repo-unreachable', missing: [] })),
+      ...(result.contractsOutOfScope ?? []).map((id) => ({ id, status: 'out-of-scope', missing: [] })),
+      ...(result.contractsUnregistered ?? []).map((id) => ({ id, status: 'repo-unregistered', missing: [] })),
+      ...(result.contractsPartial ?? []).map((id) => ({ id, status: 'checkout-incomplete', missing: [] })),
+    ])
+
   if (!result.checked) {
+    if (isAgentFormat(flags)) {
+      const rows = skippedRows()
+      if (rows.length) process.stdout.write(tsv(rows) + '\n')
+    }
     // Report what went wrong first: a repo that failed to clone is a hard failure, and
     // returning early with "nothing to verify" would present it as an empty-but-fine map.
     for (const r of result.repos.filter((x) => x.error)) {
@@ -616,15 +630,10 @@ function verifyCmd(args, flags) {
     )
     // Contracts dropped before they were ever checked produce no `contracts` entry at all, so
     // without these the agent sees an empty result and reads it as clean.
-    const skipped = [
-      ...(result.contractsStranded ?? []).map((id) => ({ id, status: 'repo-unreachable', missing: [] })),
-      ...(result.contractsOutOfScope ?? []).map((id) => ({ id, status: 'out-of-scope', missing: [] })),
-      ...(result.contractsUnregistered ?? []).map((id) => ({ id, status: 'repo-unregistered', missing: [] })),
-      ...(result.contractsPartial ?? []).map((id) => ({ id, status: 'checkout-incomplete', missing: [] })),
-    ]
     const rows = [
       ...result.broken.map(verifyRow),
-      ...contractRows([...result.contractIssues, ...notable, ...skipped]),
+      ...contractRows([...result.contractIssues, ...notable]),
+      ...skippedRows(),
     ]
     if (rows.length) process.stdout.write(tsv(rows) + '\n')
     return

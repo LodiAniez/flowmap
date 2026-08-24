@@ -360,3 +360,25 @@ test('an invalid, empty or repeated --format is rejected', () => {
   }
   assert.equal(flowmap('verify', '--format=agent').code, 0, 'and the valid spelling still works')
 })
+
+// The early return fired before the agent branch, so a run that checked nothing wrote nothing
+// at all to stdout — the silence the skipped-rows block exists to prevent.
+test('an agent run that checked nothing still says so', () => {
+  const scoped = join(root, 'agent-nothing.json')
+  writeFileSync(scoped, JSON.stringify({
+    repos: { a: { url: repo, branch: 'main' }, b: { url: repo, branch: 'main' } },
+    contracts: { onB: { kind: 'event', schema: 'src/nowhere.ts', fields: ['x'] } },
+    journeys: {
+      ja: { hops: [{ repo: 'a', reads: 'src/handler.ts::handleThing' }] },
+      // No reads or writes: acceptDraft only validates anchors that exist, so this is a
+      // legitimate hop — and it makes `--repos b` resolve nothing at all.
+      jb: { hops: [{ repo: 'b', outbound: 'onB' }] },
+    },
+    verified: {},
+  }))
+  const r = flowmap('verify', '--repos', 'b', '--format=agent',
+    { mapPath: scoped, cache: join(root, '.cache-agent-nothing') })
+  assert.equal(r.code, 0)
+  assert.match(r.err, /nothing to verify/, 'the run genuinely checked nothing')
+  assert.match(r.out, /onB/, 'and stdout must still carry the contract it could not check')
+})

@@ -479,3 +479,20 @@ test('a malformed field name is coerced, not thrown', async () => {
       `fields=${JSON.stringify(fields)} must not throw`)
   }
 })
+
+// A bare path can exist in several repos, and a scoped run only looks in some — so finding
+// exactly one copy proves nothing about whether it is the right one.
+test('a scoped run withholds a verdict from the one copy it happened to fetch', () => {
+  // `svc` holds the file; `other` is registered but was not fetched by this run.
+  const map = { repos: { svc: {}, other: {} }, contracts: {}, journeys: {} }
+
+  const scopedRun = checkContractWith(map, { schema: 'src/standalone.ts', fields: ['alpha'] }, new Set(['svc']), true)
+  assert.equal(scopedRun.status, UNSEARCHED,
+    'other was never looked in, so the copy we found may not be the right one')
+
+  // A full run has looked everywhere, so a single match is the answer.
+  const fullRun = checkContractWith(
+    map, { schema: 'src/standalone.ts', fields: ['alpha'] }, new Set(['svc', 'other']), false
+  )
+  assert.equal(fullRun.status, SCHEMA_OK)
+})
