@@ -564,3 +564,28 @@ test('a contract outside the run scope is distinguished from one whose repo fail
   assert.deepEqual(result.contractsStranded, [], 'nothing failed to sync')
   assert.deepEqual(result.contractsOutOfScope, ['onB'], 'it was simply not in scope')
 })
+
+// An orphan contract — in the map but carried by no hop — is never checked by any run, so
+// waiting for it to resolve made the unused-repo report unreachable.
+test('an orphan contract does not disable the unused-repo report', () => {
+  const spare = join(root, 'orphan-spare')
+  mkdirSync(join(spare, 'src'), { recursive: true })
+  writeFileSync(join(spare, 'src', 'x.ts'), 'export const x = 1\n')
+  run(['init', '-q', '-b', 'main'], spare)
+  run(['add', '-A'], spare)
+  run(['-c', 'user.email=t@e.com', '-c', 'user.name=t', 'commit', '-qm', 'init'], spare)
+
+  const map = {
+    repos: { svc: { url: upstream, branch: 'main' }, nobody: { url: spare, branch: 'main' } },
+    // Carried by no hop: left behind when a journey was deleted.
+    contracts: { leftover: { kind: 'event', schema: 'src/schemas/old.ts', fields: [] } },
+    verified: {},
+    journeys: { flow: { hops: [{ repo: 'svc', reads: 'src/handler.ts::handleThing' }] } },
+  }
+  const mapPath = join(root, 'flowmap-orphan.json')
+  writeFileSync(mapPath, JSON.stringify(map))
+
+  const result = verify(root, map, mapPath)
+  assert.deepEqual(result.unusedRepos, ['nobody'],
+    'an orphan must not permanently silence the report')
+})

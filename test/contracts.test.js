@@ -389,3 +389,16 @@ test('a binding containing the word import or export does not hide the others', 
       `co-import named ${other} must not drop BaseSchema`)
   }
 })
+
+// verify syncs every repo a schema ref names, whatever the scope — so for a qualified ref that
+// repo really was searched, and a deleted file is a genuine finding rather than something the
+// scope hid. Suppressing there reported "not checked: this run was scoped" on every scoped run.
+test('a repo-qualified schema that is genuinely gone is reported even on a scoped run', () => {
+  const map = { repos: { svc: {}, other: {} }, contracts: {}, journeys: {} }
+  const gone = checkContractWith(map, { schema: 'svc/src/deleted.ts', fields: ['x'] }, new Set(['svc']), true)
+  assert.equal(gone.status, SCHEMA_NOT_FOUND, 'the named repo was searched')
+
+  // A bare path on the same scoped run stays suppressed: we genuinely did not look everywhere.
+  const bare = checkContractWith(map, { schema: 'src/deleted.ts', fields: ['x'] }, new Set(['svc']), true)
+  assert.equal(bare.status, UNSEARCHED)
+})

@@ -72,20 +72,29 @@ function scopeFor(map, flags, purpose) {
 
 function ensureSynced(root, map, ids, flags, mode = 'full', { widen = false } = {}) {
   let offline = false
+  let blockedByFlag = false
   const missing = ids.filter((id) => !isSynced(root, id))
   if (flags['no-sync'] === true) {
     if (missing.length) {
       throw new UserError(`not synced: ${missing.join(', ')}\nDrop --no-sync or run \`flowmap sync\`.`)
     }
     // Widening a blobless sparse clone has to fetch, which --no-sync promised not to do — and
-    // so does re-fetching after a changed origin url.
-    widen = false
+    // so does re-fetching after a changed origin url. Keep the caller's intent separate, so a
+    // caller that never wanted to widen is not told the flag stopped it.
     offline = true
+    if (widen) blockedByFlag = true
+    widen = false
   }
   if (missing.length) {
     process.stderr.write(dim(`syncing ${missing.length} repo(s): ${missing.join(', ')}\n`))
   }
-  return syncMany(root, map, ids, { mode, widen, offline, refresh: !offline && flags.refresh === true })
+  return syncMany(root, map, ids, {
+    mode,
+    widen,
+    offline,
+    blockedByFlag,
+    refresh: !offline && flags.refresh === true,
+  })
 }
 
 // Anchors can only be resolved against real checkouts, so any command that resolves them

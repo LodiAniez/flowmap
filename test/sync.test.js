@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
-import { mkdtempSync, mkdirSync, writeFileSync, existsSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, writeFileSync, existsSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -161,6 +161,32 @@ test('declining to widen by choice is distinguished from --no-sync declining', (
   const byDesign = syncRepo(root, 'svc-reason', { url: up, branch: 'main' }, { mode: 'full', widen: false })
   assert.equal(byDesign.narrowedReason, 'by-design', 'the caller simply did not need the rest')
 
-  const offline = syncRepo(root, 'svc-reason', { url: up, branch: 'main' }, { mode: 'full', widen: false, offline: true })
-  assert.equal(offline.narrowedReason, 'declined', '--no-sync is a different story')
+  // The CLI sets blockedByFlag only when the caller wanted to widen and --no-sync stopped it;
+  // `offline` alone says nothing about the caller's intent.
+  const blocked = syncRepo(root, 'svc-reason', { url: up, branch: 'main' },
+    { mode: 'full', widen: false, offline: true, blockedByFlag: true })
+  assert.equal(blocked.narrowedReason, 'declined', '--no-sync is a different story')
+
+  const offlineButUnwanted = syncRepo(root, 'svc-reason', { url: up, branch: 'main' },
+    { mode: 'full', widen: false, offline: true })
+  assert.equal(offlineButUnwanted.narrowedReason, 'by-design',
+    'offline alone must not be blamed when the caller never wanted the rest')
+})
+
+// Correcting a changed url on disk while declining to fetch records the change as done, so no
+// later run ever performs the fetch it implies — and search goes on grepping the previous
+// repository's files forever, reporting them as complete.
+test('--no-sync leaves a changed url uncorrected rather than half-applied', () => {
+  const oldUp = makeUpstream('svc-offline-old', { 'a.ts': 'export const which = "old"\n' })
+  const newUp = makeUpstream('svc-offline-new', { 'a.ts': 'export const which = "new"\n' })
+
+  syncRepo(root, 'svc-offline', { url: oldUp, branch: 'main' }, { mode: 'full' })
+  const offline = syncRepo(root, 'svc-offline', { url: newUp, branch: 'main' }, { mode: 'full', offline: true })
+  assert.equal(run(['remote', 'get-url', 'origin'], offline.dir).trim(), oldUp,
+    'the correction is still owed, not silently recorded as done')
+
+  // And the next online run actually performs it.
+  const online = syncRepo(root, 'svc-offline', { url: newUp, branch: 'main' }, { mode: 'full' })
+  assert.equal(run(['remote', 'get-url', 'origin'], online.dir).trim(), newUp)
+  assert.match(readFileSync(join(online.dir, 'a.ts'), 'utf8'), /new/, 'and the tree follows')
 })
