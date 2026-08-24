@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { writeFileSync, mkdirSync, existsSync } from 'node:fs'
 import { join, dirname } from 'node:path'
-import { parseArgs, list } from '../lib/args.js'
+import { parseArgs, list, BOOLEAN_FLAGS } from '../lib/args.js'
 import { loadMap, findMapPath, resolveRepoIds, UserError, EXIT_OK, EXIT_ERROR, EXIT_USAGE } from '../lib/config.js'
 import { syncMany, isSynced } from '../lib/sync.js'
 import { searchRepos } from '../lib/search.js'
@@ -71,7 +71,7 @@ function narrowedHint(r) {
 const worthWarning = (r) => (r.narrowed && r.narrowedReason !== 'by-design') || r.staleOrigin
 
 function scopeFor(map, flags, purpose) {
-  requireValues(flags, ['repos', 'seed'])
+  requireValues(flags, ['repos', 'seed', 'max'])
   return resolveRepoIds(map, list(flags.repos), { all: flags.all === true, purpose })
 }
 
@@ -84,6 +84,18 @@ function requireValues(flags, names) {
     if (given === undefined) continue
     if (given === true || list(given).length === 0) {
       throw new UserError(`--${name} needs a value`, EXIT_USAGE)
+    }
+  }
+}
+
+// A boolean written `--force=` is an unset variable, not "on". Silently reading it as on would
+// force-accept a draft whose anchors do not resolve.
+function rejectEmptyBooleans(flags) {
+  for (const [name, value] of Object.entries(flags)) {
+    // Booleans only: a value flag written `--repos=` gets the clearer "needs a value" from
+    // requireValues, which knows what that flag is for.
+    if (BOOLEAN_FLAGS.has(name) && value === '') {
+      throw new UserError(`--${name} was given an empty value`, EXIT_USAGE)
     }
   }
 }
@@ -215,7 +227,7 @@ function draftJourney(feature, flags) {
   // Before autoSetup: it creates flowmap.json, edits .git/info/exclude, runs discovery and
   // makes a network round trip per repo. Aborting after all that is a bad way to reject an
   // argument we could have rejected immediately.
-  requireValues(flags, ['repos', 'seed', 'from'])
+  requireValues(flags, ['repos', 'seed', 'from', 'max'])
 
   const ctx = autoSetup(feature, flags) ?? loadMap()
   const { map, root } = ctx
@@ -698,6 +710,7 @@ async function visualize(args, flags) {
         `  flowmap finalize journey <feature>   then accept it`
     )
   }
+  requireValues(flags, ['port'])
   const port = Number(flags.port) > 0 ? Number(flags.port) : 7777
   await serve({ root, mapPath: path, port })
   return true // keep the process alive
@@ -907,6 +920,7 @@ async function main() {
   const { flags, positional } = parseArgs(process.argv.slice(2))
   const [name = 'help', ...rest] = positional
 
+  rejectEmptyBooleans(flags)
   if (flags.help === true || flags.h === true) return help()
   if (name in PLANNED) {
     throw new UserError(`\`flowmap ${name}\` is not built yet — ${PLANNED[name]}.`, EXIT_USAGE)

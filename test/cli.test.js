@@ -241,3 +241,37 @@ test('draft journey validates its flags before doing anything', () => {
   assert.match(r.err, /needs a value/)
   assert.ok(!existsSync(join(fresh, 'flowmap.json')), 'and nothing was created first')
 })
+
+// `--check` is dual-form. Listing it as boolean made the equals spelling fall through to
+// draftJourney(undefined) and die with a misleading usage message.
+test('draft --check accepts both spellings', () => {
+  const dir = join(root, 'drafts')
+  mkdirSync(dir, { recursive: true })
+  writeFileSync(join(dir, 'dual.json'), JSON.stringify({
+    name: 'dual', hops: [{ repo: 'svc', reads: 'src/handler.ts::handleThing' }],
+  }))
+  for (const argv of [['draft', '--check', 'dual'], ['draft', '--check=dual']]) {
+    const r = flowmap(...argv)
+    assert.doesNotMatch(r.err, /usage: flowmap draft journey/, `${argv.join(' ')} must resolve the draft`)
+    assert.match(r.out + r.err, /dual/)
+  }
+})
+
+// A boolean written `--force=` is an unset shell variable, not "on" — silently reading it as
+// on would force-accept a draft whose anchors do not resolve.
+test('an empty value on a boolean flag is rejected', () => {
+  for (const arg of ['--force=', '--all=']) {
+    const r = flowmap('verify', arg)
+    assert.equal(r.code, 2, `${arg} must not be read as on`)
+    assert.match(r.err, /empty value/)
+  }
+})
+
+// A bare value flag parses as true, and Number(true) is 1 — so --max silently caps at one hit.
+test('a bare numeric flag is rejected rather than read as 1', () => {
+  for (const argv of [['search', 'needle', '--max'], ['visualize', '--port']]) {
+    const r = flowmap(...argv)
+    assert.equal(r.code, 2, `flowmap ${argv.join(' ')} must not silently mean 1`)
+    assert.match(r.err, /needs a value/)
+  }
+})

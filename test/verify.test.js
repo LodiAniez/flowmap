@@ -653,3 +653,41 @@ test('verify tolerates a map with no verified block', () => {
   assert.doesNotThrow(() => verify(root, map, mapPath))
   assert.ok(map.verified.svc)
 })
+
+// A hop naming a contract the map does not define is a map defect acceptDraft already reports,
+// not something this run declined to check.
+test('a hop naming an undefined contract is not reported as unchecked', () => {
+  const map = {
+    repos: { a: { url: upstream, branch: 'main' }, b: { url: upstream, branch: 'main' } },
+    contracts: {},
+    verified: {},
+    journeys: {
+      ja: { hops: [{ repo: 'a', reads: 'src/handler.ts::handleThing' }] },
+      jb: { hops: [{ repo: 'b', reads: 'src/handler.ts::handleThing', outbound: 'does.not.exist' }] },
+    },
+  }
+  const mapPath = join(root, 'flowmap-ghost-contract.json')
+  writeFileSync(mapPath, JSON.stringify(map))
+
+  const result = verify(root, map, mapPath, { repoIds: ['a'] })
+  assert.deepEqual(result.contractsOutOfScope, [], 'it does not exist, so it was not skipped')
+  assert.deepEqual(result.contractsStranded, [])
+})
+
+// A repo missing from the registry needs the map fixed, not the network retried.
+test('a registry defect is not reported as a sync failure', () => {
+  const map = {
+    repos: { a: { url: upstream, branch: 'main' } },
+    contracts: { c: { kind: 'event', schema: 'src/x.ts', fields: [] } },
+    verified: {},
+    journeys: {
+      ja: { hops: [{ repo: 'a', reads: 'src/handler.ts::handleThing' }] },
+      jb: { hops: [{ repo: 'not-registered', reads: 'x.ts::y', outbound: 'c' }] },
+    },
+  }
+  const mapPath = join(root, 'flowmap-registry-defect.json')
+  writeFileSync(mapPath, JSON.stringify(map))
+
+  const result = verify(root, map, mapPath)
+  assert.deepEqual(result.contractsStranded, [], 'not a sync failure')
+})
