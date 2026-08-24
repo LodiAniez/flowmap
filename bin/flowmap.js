@@ -27,7 +27,7 @@ const USAGE = `flowmap — cross-repo data-flow context reference
   flowmap draft journey <feature>     map a feature across repos into a draft
   flowmap show journey <feature>      diagram it, with payload fields and types
   flowmap finalize journey <feature>  accept a reviewed draft into flowmap.json
-  flowmap verify                      re-check every anchor against default branches
+  flowmap verify [<feature>]          re-check every anchor against default branches
   flowmap visualize                   interactive UI, with payload simulation
 
 Setup
@@ -378,6 +378,24 @@ function impactCmd(args, flags) {
 
 function verifyCmd(args, flags) {
   const { map, path, root } = loadMap()
+
+  // `flowmap verify <feature>` is the obvious spelling, so accept it rather than silently
+  // verifying everything and letting the caller believe they scoped it.
+  const named = args.filter((a) => !NOUNS.has(a))
+
+  // Validate every spelling, positional and flag alike. An unrecognised name would otherwise
+  // resolve to zero anchors and print "every anchor resolves" — a clean bill of health for
+  // nothing checked, which is worse than an error.
+  const requested = [...named, ...list(flags.journey)]
+  for (const name of requested) {
+    // hasOwn, not truthiness: `journeys.constructor` is inherited and would pass.
+    if (!Object.hasOwn(map.journeys, name)) {
+      throw new UserError(
+        `no journey "${name}"\nknown: ${Object.keys(map.journeys).join(', ') || '(none)'}`,
+        EXIT_USAGE
+      )
+    }
+  }
   if (!Object.keys(map.journeys).length) {
     throw new UserError(`no journeys in ${display(root, path)} yet — flowmap draft journey <feature>`)
   }
@@ -392,9 +410,13 @@ function verifyCmd(args, flags) {
     repoIds = [id]
   }
 
+  // Route repo ids through the same validation the rest of the CLI uses, so a typo errors
+  // instead of quietly narrowing the scope to nothing.
+  if (repoIds.length) resolveRepoIds(map, repoIds, { all: true, purpose: 'verify' })
+
   const result = runVerify(root, map, path, {
     repoIds: repoIds.length ? repoIds : null,
-    journeys: list(flags.journey).length ? list(flags.journey) : null,
+    journeys: requested.length ? requested : null,
   })
 
   if (isAgentFormat(flags)) {
@@ -436,7 +458,15 @@ function verifyCmd(args, flags) {
   } else {
     process.stdout.write(`\n  ${green('every anchor resolves.')}\n`)
   }
-  process.stdout.write(dim(`  recorded in ${display(root, path)} under "verified"\n`))
+  if (result.partial.length) {
+    process.stdout.write(
+      `  ${yellow('scoped run — not recorded:')} ${result.partial.join(', ')}\n` +
+        dim('  Verification is tracked per repo, so a partial run cannot mark one verified\n') +
+        dim('  without vouching for journeys it never checked. Run `flowmap verify` bare.\n')
+    )
+  } else {
+    process.stdout.write(dim(`  recorded in ${display(root, path)} under "verified"\n`))
+  }
   // Findings never exit non-zero. See DESIGN.md "Advisory only. Never a gate."
 }
 

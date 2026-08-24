@@ -116,3 +116,42 @@ test('agent column order is pinned', () => {
   assert.equal(row.length, VERIFY_COLUMNS.length)
   assert.equal(row[6], '-', 'a missing line renders as a dash, never an empty cell')
 })
+
+// `verified` is tracked per repo, but scoping to a journey resolves only that journey's
+// anchors. Recording a partial run marks every OTHER journey's hops in that repo `ok`
+// without ever checking them — and moves the sha, suppressing the next drift report.
+test('a journey-scoped run does not record verification for the repo', async () => {
+  const { journey } = await import('../lib/graph.js')
+  const map = freshMap()
+  map.journeys.other = { hops: [{ repo: 'svc', reads: 'src/handler.ts::doesNotExist' }] }
+  const mapPath = join(root, 'flowmap-partial.json')
+  writeFileSync(mapPath, JSON.stringify(map))
+
+  const result = verify(root, map, mapPath, { journeys: ['flow'] })
+
+  assert.deepEqual(result.partial, ['svc'], 'the run reports itself as partial')
+  assert.equal(map.verified.svc, undefined, 'nothing is recorded')
+  assert.equal(journey(map, 'other').hops[0].status, 'unverified',
+    'the unchecked journey must not inherit a pass')
+})
+
+test('a full run does record, and its tally covers every journey in the repo', () => {
+  const map = freshMap()
+  map.journeys.other = { hops: [{ repo: 'svc', reads: 'src/handler.ts::doesNotExist' }] }
+  const mapPath = join(root, 'flowmap-full.json')
+  writeFileSync(mapPath, JSON.stringify(map))
+
+  const result = verify(root, map, mapPath)
+  assert.deepEqual(result.partial, [])
+  assert.equal(map.verified.svc.anchors, '1/2', 'the broken anchor is counted')
+  assert.equal(result.broken.length, 1)
+})
+
+test('a repo-scoped run over all its journeys still records', () => {
+  const map = freshMap()
+  const mapPath = join(root, 'flowmap-repo-scoped.json')
+  writeFileSync(mapPath, JSON.stringify(map))
+  const result = verify(root, map, mapPath, { repoIds: ['svc'] })
+  assert.deepEqual(result.partial, [], 'scoping by repo is not partial coverage of that repo')
+  assert.ok(map.verified.svc)
+})

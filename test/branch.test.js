@@ -74,3 +74,31 @@ test('classifies remote urls versus local paths', () => {
   assert.ok(!isRemoteUrl('/Users/me/code/repo'))
   assert.ok(!isRemoteUrl('~/code/repo'))
 })
+
+// A missed url form is not cosmetic: it gets resolved as a relative path and mangled into
+// `<root>/https:/…`, which git cannot clone. `init` and bare `repo add` feed this straight
+// from `git remote get-url origin`, so any form a real origin can take must be recognised.
+test('recognises every clone url form git accepts', () => {
+  const remotes = [
+    'https://github.com/acme/x.git',
+    'http://internal.host/x.git',
+    'ssh://git@host/x.git',
+    'git://host/x.git',
+    'file:///Users/me/repos/x.git',
+    'git+ssh://host/x.git',
+    'git@github.com:acme/x.git',
+    'dev@gitlab.acme.com:team/web.git', // scp-style with a non-git user
+  ]
+  for (const url of remotes) assert.ok(isRemoteUrl(url), `${url} must read as remote`)
+})
+
+test('filesystem paths are not mistaken for urls', () => {
+  for (const p of ['../orders-api', '/abs/path/x', './x', 'plain-name', 'C:/x']) {
+    assert.ok(!isRemoteUrl(p), `${p} must read as a path`)
+  }
+})
+
+test('non-strings do not throw', () => {
+  assert.equal(isRemoteUrl(undefined), false)
+  assert.equal(isRemoteUrl(null), false)
+})
