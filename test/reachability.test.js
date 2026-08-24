@@ -100,3 +100,70 @@ test('every repo status is reachable', async () => {
   assert.equal(repoStatus({ verified: { x: { at: new Date(Date.now() - 2 * day).toISOString() } } }, 'x'), 'ok')
   assert.equal(repoStatus({ verified: { x: { at: new Date(Date.now() - 200 * day).toISOString() } } }, 'x'), 'stale')
 })
+
+// --- reachability under a REAL verify -----------------------------------------------------
+//
+// The tests above build a checkout by hand and call the library directly. That is exactly the
+// blind spot that let the sparse cone defeat import-following in production while every unit
+// test stayed green: verify narrows the checkout it then reads, and a schema's sibling
+// directories fall outside the cone. A verdict is only genuinely reachable if it survives the
+// checkout shape verify itself creates.
+
+const gitRun = (a, c) => execFileSync('git', a, { cwd: c, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })
+
+function realRepo(name, files) {
+  const dir = join(root, name)
+  for (const [rel, body] of Object.entries(files)) {
+    mkdirSync(join(dir, rel, '..'), { recursive: true })
+    writeFileSync(join(dir, rel), body)
+  }
+  gitRun(['init', '-q', '-b', 'main'], dir)
+  gitRun(['add', '-A'], dir)
+  gitRun(['-c', 'user.email=t@e.com', '-c', 'user.name=t', 'commit', '-qm', 'init'], dir)
+  return dir
+}
+
+test('FIELDS_MISSING survives the sparse cone a real verify creates', async () => {
+  const { verify } = await import('../lib/verify.js')
+  // The ordinary layout: the anchor is nested, and the schema imports from a sibling dir.
+  const up = realRepo('coned', {
+    'src/api/handler.ts': 'export function handle() {}\n',
+    'src/types/base.ts': 'export const Base = z.object({ total: z.number() })\n',
+    'src/schemas/order.ts': "import { Base } from '../types/base.js'\nexport const Order = Base\n",
+  })
+  const map = {
+    // A repo id of its own: the unit fixtures above pre-create a fake `svc` cache entry.
+    repos: { coned: { url: up, branch: 'main' } },
+    contracts: { order: { kind: 'event', schema: 'src/schemas/order.ts', fields: ['total', 'absent'] } },
+    journeys: { flow: { hops: [{ repo: 'coned', reads: 'src/api/handler.ts::handle', outbound: 'order' }] } },
+    verified: {},
+  }
+  const mapPath = join(root, 'flowmap-coned.json')
+  writeFileSync(mapPath, JSON.stringify(map))
+
+  const r = verify(root, map, mapPath)
+  const order = r.contracts.find((x) => x.id === 'order')
+  assert.equal(order.status, c.FIELDS_MISSING,
+    'the cone must not turn a real verdict into "could not tell"')
+  assert.deepEqual(order.missing, ['absent'], 'and `total` must be found through the sibling import')
+})
+
+test('SCHEMA_OK survives the sparse cone too', async () => {
+  const { verify } = await import('../lib/verify.js')
+  const up = realRepo('coned-ok', {
+    'src/api/handler.ts': 'export function handle() {}\n',
+    'src/types/base.ts': 'export const Base = z.object({ total: z.number() })\n',
+    'src/schemas/order.ts': "import { Base } from '../types/base.js'\nexport const Order = Base\n",
+  })
+  const map = {
+    repos: { conedok: { url: up, branch: 'main' } },
+    contracts: { order: { kind: 'event', schema: 'src/schemas/order.ts', fields: ['total'] } },
+    journeys: { flow: { hops: [{ repo: 'conedok', reads: 'src/api/handler.ts::handle', outbound: 'order' }] } },
+    verified: {},
+  }
+  const mapPath = join(root, 'flowmap-coned-ok.json')
+  writeFileSync(mapPath, JSON.stringify(map))
+  const r = verify(root, map, mapPath)
+  assert.equal(r.contracts.find((x) => x.id === 'order').status, c.SCHEMA_OK)
+  assert.deepEqual(r.contractIssues, [])
+})

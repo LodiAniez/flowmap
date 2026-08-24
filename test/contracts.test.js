@@ -212,3 +212,16 @@ test('a fully-followed import graph can still report a missing field', () => {
   assert.equal(r.status, FIELDS_MISSING, 'the graph was fully read, so absence is real')
   assert.deepEqual(r.missing, ['absent'])
 })
+
+// A star re-export republishes whatever the package declares, so every field could be coming
+// from somewhere unreadable. Reporting them missing is the confident-wrong-answer case.
+test('a star re-export from a package is inconclusive', () => {
+  writeFileSync(join(repo, 'src', 'star.ts'), "export * from '@acme/shared-schemas'\n")
+  assert.equal(check({ schema: 'src/star.ts', fields: ['total', 'currency'] }).status, INCONCLUSIVE)
+})
+
+test('composition through a namespace import is seen', () => {
+  writeFileSync(join(repo, 'src', 'ns.ts'),
+    "import * as Shared from '@acme/shared-schemas'\nexport const S = Shared.Base.extend({ own: 1 })\n")
+  assert.equal(check({ schema: 'src/ns.ts', fields: ['own', 'total'] }).status, INCONCLUSIVE)
+})

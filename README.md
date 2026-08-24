@@ -308,14 +308,16 @@ $ flowmap verify
       symbol not found
 ```
 
-It syncs **sparse** — only the files the anchors name plus each contract's schema — so it
-pulls kilobytes per repo, not a clone. Roughly 8 seconds across three repos.
+It syncs **sparse** — the directories the anchors name, plus the top-level directory holding
+each contract's schema so the schema's own imports are readable. Kilobytes per repo, not a
+clone. A *full* run also touches every registered repo, because only a full run is entitled
+to say a schema exists nowhere; a scoped run stays within its scope.
 
 It also checks each contract against the file at its `schema` path — a declared field whose
 name appears nowhere in its own schema is a strong signal, whatever the format:
 
 ```
-  1 contract(s) disagree with their schema:
+  contracts: 1 disagree with their schema
     event.order.created — src/events/schemas/order.ts
       not found in the schema: order.discount
 ```

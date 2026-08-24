@@ -434,7 +434,7 @@ function verifyCmd(args, flags) {
     journeys: requested.length ? requested : null,
   })
 
-  if (!result.repos.length) {
+  if (!result.checked) {
     throw new UserError(
       `nothing to verify in that scope — no journey hop names ` +
         (repoIds.length ? `repo(s) ${repoIds.join(', ')}` : 'those journeys') + `.\n` +

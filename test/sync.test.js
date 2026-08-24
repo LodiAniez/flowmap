@@ -112,3 +112,16 @@ test('a full-mode sync that does not grep leaves the cone alone', () => {
   const after = syncRepo(root, 'svc-keepcone', { url: up, branch: 'main' }, { mode: 'full' })
   assert.ok(!existsSync(join(after.dir, 'elsewhere', 'b.ts')), 'the cone survives')
 })
+
+// --no-sync declines to widen, which is correct — but the tree is still coned, and a caller
+// that greps it has to know, or it presents a partial sweep as complete.
+test('declining to widen still reports the checkout as narrowed', () => {
+  const up = makeUpstream('svc-nosync', { 'a/one.ts': 'export const a = 1\n', 'b/two.ts': 'export const b = 1\n' })
+  syncRepo(root, 'svc-nosync', { url: up, branch: 'main' }, { mode: 'sparse', paths: ['a'] })
+
+  const declined = syncRepo(root, 'svc-nosync', { url: up, branch: 'main' }, { mode: 'full', widen: false })
+  assert.equal(declined.narrowed, true, 'silence here would look like a complete tree')
+
+  const widened = syncRepo(root, 'svc-nosync', { url: up, branch: 'main' }, { mode: 'full', widen: true })
+  assert.equal(widened.narrowed, false)
+})

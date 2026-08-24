@@ -297,3 +297,29 @@ test('a schema-only repo is not reported as skipped by scoping', () => {
   assert.deepEqual(result.partial, [], 'a bare run is not a scoped run')
   assert.equal(map.verified.shared, undefined, 'and nothing is vouched for there')
 })
+
+// Only a full run earns the right to say "not found anywhere", so only a full run should pay
+// to look everywhere. A scoped run cloning the whole registry also bypasses the sweep guard.
+test('a scoped run does not clone repos outside its scope', () => {
+  const other = join(root, 'unrelated-repo')
+  mkdirSync(join(other, 'src'), { recursive: true })
+  writeFileSync(join(other, 'src', 'x.ts'), 'export const x = 1\n')
+  run(['init', '-q', '-b', 'main'], other)
+  run(['add', '-A'], other)
+  run(['-c', 'user.email=t@e.com', '-c', 'user.name=t', 'commit', '-qm', 'init'], other)
+
+  const map = {
+    repos: { svc: { url: upstream, branch: 'main' }, unrelated: { url: other, branch: 'main' } },
+    contracts: {},
+    verified: {},
+    journeys: {
+      flow: { hops: [{ repo: 'svc', reads: 'src/handler.ts::handleThing' }] },
+      elsewhere: { hops: [{ repo: 'unrelated', reads: 'src/x.ts::x' }] },
+    },
+  }
+  const mapPath = join(root, 'flowmap-scope-clone.json')
+  writeFileSync(mapPath, JSON.stringify(map))
+
+  const result = verify(root, map, mapPath, { journeys: ['flow'] })
+  assert.deepEqual(result.repos.map((r) => r.id), ['svc'], 'only the scoped journey\'s repo')
+})
