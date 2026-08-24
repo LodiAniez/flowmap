@@ -395,8 +395,17 @@ The brief tells the agent to stop at `show journey` and leave accepting to you. 
 gate is the whole reason a generated journey is trustworthy: anchors are machine-checked, so
 your attention goes to scope and altitude, which no machine can judge.
 
-A ready-made skill for this lives in `skills/flowmap-draft-journey/SKILL.md` — copy it to
-`~/.claude/skills/` to get `/flowmap-draft-journey <feature>` in every repo.
+Two ready-made skills live in `skills/` — copy them to `~/.claude/skills/` to get them in
+every repo:
+
+| skill | for |
+| --- | --- |
+| `/flowmap-draft-journey <feature>` | **building** a map: discovers the repos, drafts the hops, verifies its own anchors |
+| `/flowmap-analyze <change>` | **using** one: which hops a fix touches, what downstream consumes it, which files to open |
+
+`analyze` is where the map pays off. Reading a journey costs a few hundred tokens; sweeping
+the repos costs tens of thousands and still misses the async consumers — which is the whole
+argument for the tool.
 
 ## The agent block
 
