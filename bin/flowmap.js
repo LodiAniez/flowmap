@@ -6,6 +6,7 @@ import { loadMap, findMapPath, resolveRepoIds, UserError, EXIT_OK, EXIT_ERROR, E
 import { syncMany, isSynced } from '../lib/sync.js'
 import { searchRepos } from '../lib/search.js'
 import { buildBrief, writeBrief, checkDraft, statusLabel, OK } from '../lib/draft.js'
+import { resolveAnchor } from '../lib/anchor.js'
 import {
   initMap, addRepo, removeRepo, normalizeSource, describeLocalRepo, originUrlOf, hideCacheFromGit,
 } from '../lib/registry.js'
@@ -94,6 +95,17 @@ function localRepoId(map) {
 
   const name = basename(here)
   return Object.hasOwn(map.repos ?? {}, name) ? name : null
+}
+
+// Whether any of this journey's anchors fail to resolve against the current checkouts.
+function anchorsMissing(root, journey) {
+  for (const hop of Array.isArray(journey?.hops) ? journey.hops : []) {
+    for (const side of ['reads', 'writes']) {
+      if (!hop?.[side]) continue
+      if (resolveAnchor(root, hop.repo, hop[side]).status !== OK) return true
+    }
+  }
+  return false
 }
 
 function scopeFor(map, flags, purpose) {
@@ -380,10 +392,15 @@ function showJourney(feature, flags) {
   requireSingle(flags, ['out'])
   const accepted = Object.hasOwn(map.journeys, feature) ? map.journeys[feature] : undefined
   const journey = accepted ?? loadDraft(root, feature).draft
-  // Only a draft needs widening: verify's cone is built from the accepted journeys, so it
-  // already covers this one's anchors. Widening anyway would disable sparse on every hop repo
-  // for a read-only command.
+  // A draft always needs widening; verify's cone cannot contain its anchors. An accepted
+  // journey usually does not — but that cone is only as fresh as the last verify, so an anchor
+  // added since would resolve as missing against a stale one. Widen only if something actually
+  // fails to resolve, which keeps the common read cheap without reporting a file that exists
+  // as deleted.
   syncForJourney(root, map, journey, flags, { widen: !accepted })
+  if (accepted && anchorsMissing(root, journey)) {
+    syncForJourney(root, map, journey, flags, { widen: true })
+  }
 
   if (flags.mermaid === true) {
     process.stdout.write(mermaid(map, feature, journey) + '\n')

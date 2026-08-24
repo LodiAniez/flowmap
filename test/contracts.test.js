@@ -496,3 +496,32 @@ test('a scoped run withholds a verdict from the one copy it happened to fetch', 
   )
   assert.equal(fullRun.status, SCHEMA_OK)
 })
+
+// A `.proto` include and a JSON Schema $ref carry no bindings, so nothing marked the shape as
+// continuing elsewhere and composed fields were reported definitely missing — against a README
+// that promises the check works whatever the format.
+test('a bindingless include from another format is inconclusive, not missing', () => {
+  writeFileSync(join(repo, 'src', 'customer.proto'), 'message Customer { string customer_id = 1; }\n')
+  writeFileSync(join(repo, 'src', 'order.proto'), 'import "customer.proto";\nmessage Order { string id = 1; }\n')
+  assert.equal(check({ schema: 'src/order.proto', fields: ['id', 'customer_id'] }).status, INCONCLUSIVE)
+})
+
+test('a JSON Schema $ref is followed', () => {
+  writeFileSync(join(repo, 'src', 'customer.json'), '{"properties":{"customerId":{"type":"string"}}}')
+  writeFileSync(join(repo, 'src', 'order.json'),
+    '{"properties":{"id":{"type":"string"},"customer":{"$ref":"./customer.json"}}}')
+  assert.equal(check({ schema: 'src/order.json', fields: ['id', 'customerId'] }).status, SCHEMA_OK)
+  assert.equal(check({ schema: 'src/order.json', fields: ['id', 'nowhere'] }).status, FIELDS_MISSING)
+})
+
+// A commented-out import is ordinary in real files. Parsing it as real made its unresolvable
+// spec set `external`, downgrading a genuine finding with a claim that is simply false.
+test('a commented-out import does not blunt the check', () => {
+  writeFileSync(join(repo, 'src', 'commented.ts'),
+    "// legacy: import { Old } from './old-removed'\n" +
+    "/* import { Older } from './also-gone' */\n" +
+    "import { z } from 'zod'\nexport const S = z.object({ total: z.number() })\n")
+  const r = check({ schema: 'src/commented.ts', fields: ['total', 'nowhere'] })
+  assert.equal(r.status, FIELDS_MISSING, 'dead imports hide nothing')
+  assert.deepEqual(r.missing, ['nowhere'])
+})
