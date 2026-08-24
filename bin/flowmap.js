@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { writeFileSync, mkdirSync, existsSync } from 'node:fs'
-import { join, dirname } from 'node:path'
+import { join, dirname, basename } from 'node:path'
 import { parseArgs, list, BOOLEAN_FLAGS } from '../lib/args.js'
 import { loadMap, findMapPath, resolveRepoIds, UserError, EXIT_OK, EXIT_ERROR, EXIT_USAGE } from '../lib/config.js'
 import { syncMany, isSynced } from '../lib/sync.js'
@@ -17,7 +17,7 @@ import { verify as runVerify, verifyRow, contractRows } from '../lib/verify.js'
 import { writeScaffold } from '../lib/scaffold.js'
 import { discover, repoRoot } from '../lib/discover.js'
 import { serve } from '../lib/server.js'
-import { display } from '../lib/paths.js'
+import { display, fromPortable } from '../lib/paths.js'
 import { bold, dim, red, green, yellow, cyan, tsv, isAgentFormat } from '../lib/output.js'
 
 const USAGE = `flowmap — cross-repo data-flow context reference
@@ -77,6 +77,24 @@ function narrowedHint(r) {
 // A checkout left narrow because this caller had no reason to widen it is not a problem to
 // report — the cone already covers what it is about to read.
 const worthWarning = (r) => (r.narrowed && r.narrowedReason !== 'by-design') || r.staleOrigin
+
+// Which registry entry the checkout we are standing in corresponds to. Matched on the repo's
+// origin url or its path first, falling back to the directory name — `repo add billing
+// ../billing-service` registers `billing` under a directory called `billing-service`.
+function localRepoId(map) {
+  const here = repoRoot()
+  if (!here) return null
+
+  const origin = originUrlOf(here)
+  for (const [id, entry] of Object.entries(map.repos ?? {})) {
+    if (!entry?.url) continue
+    if (origin && entry.url === origin) return id
+    if (!isRemoteUrl(entry.url) && fromPortable(dirname(findMapPath()), entry.url) === here) return id
+  }
+
+  const name = basename(here)
+  return Object.hasOwn(map.repos ?? {}, name) ? name : null
+}
 
 function scopeFor(map, flags, purpose) {
   requireValues(flags, ['repos', 'seed', 'max', 'out'])
@@ -538,9 +556,8 @@ function verifyCmd(args, flags) {
 
   let repoIds = list(flags.repos)
   if (flags.local === true) {
-    const here = repoRoot()
-    const id = here ? here.split('/').pop() : null
-    if (!id || !map.repos[id]) throw new UserError('--local needs to run inside a registered repo', EXIT_USAGE)
+    const id = localRepoId(map)
+    if (!id) throw new UserError('--local needs to run inside a registered repo', EXIT_USAGE)
     repoIds = [id]
   }
 
@@ -548,13 +565,13 @@ function verifyCmd(args, flags) {
   // instead of quietly narrowing the scope to nothing.
   if (repoIds.length) resolveRepoIds(map, repoIds, { all: true, purpose: 'verify' })
 
-  const here = repoRoot()
   const result = runVerify(root, map, path, {
     repoIds: repoIds.length ? repoIds : null,
     journeys: requested.length ? requested : null,
     // The repo we are standing in, so the unused report cannot advise removing the one
-    // `--local` depends on.
-    self: here ? here.split('/').pop() : null,
+    // `--local` depends on. Resolved by matching the registry, not by assuming the id equals
+    // the directory name — `repo add billing ../billing-service` breaks that assumption.
+    self: localRepoId(map),
   })
 
   if (!result.checked) {
@@ -569,12 +586,24 @@ function verifyCmd(args, flags) {
     process.stderr.write(
       yellow(
         repoIds.length
-          ? `nothing to verify — no journey hop names repo(s) ${repoIds.join(', ')}\n`
+          ? `nothing to verify — no anchored hop in repo(s) ${repoIds.join(', ')}\n`
           : requested.length
             ? `nothing to verify — ${requested.join(', ')} has no anchored hops\n`
             : `nothing to verify — no journey in the map has a reads or writes anchor\n`
       ) + dim('  reporting this rather than a clean result, which would mean nothing was checked\n')
     )
+    // The contracts those hops carry are the only thing this run has to say; returning without
+    // them reports a clean-ish nothing over checks that never happened.
+    for (const [ids, why] of [
+      [result.contractsPartial, "their repo's checkout came up incomplete"],
+      [result.contractsStranded, 'their repo failed to sync'],
+      [result.contractsUnregistered, 'their repo is not in the registry'],
+      [result.contractsOutOfScope, 'they are outside this run\'s scope'],
+    ]) {
+      if (ids?.length) {
+        process.stderr.write(dim(`  ${ids.length} contract(s) not checked: ${why}\n`))
+      }
+    }
     return
   }
 
@@ -591,6 +620,7 @@ function verifyCmd(args, flags) {
       ...(result.contractsStranded ?? []).map((id) => ({ id, status: 'repo-unreachable', missing: [] })),
       ...(result.contractsOutOfScope ?? []).map((id) => ({ id, status: 'out-of-scope', missing: [] })),
       ...(result.contractsUnregistered ?? []).map((id) => ({ id, status: 'repo-unregistered', missing: [] })),
+      ...(result.contractsPartial ?? []).map((id) => ({ id, status: 'checkout-incomplete', missing: [] })),
     ]
     const rows = [
       ...result.broken.map(verifyRow),
@@ -965,6 +995,15 @@ const COMMANDS = {
 
 async function main() {
   const { flags, positional } = parseArgs(process.argv.slice(2))
+  // Every other value flag is guarded at its command; `--format` is read everywhere, so guard
+  // it once here. `--format=` silently yields human prose to a caller parsing TSV.
+  if (flags.format !== undefined) {
+    requireValues(flags, ['format'])
+    requireSingle(flags, ['format'])
+    if (!['agent', 'human'].includes(String(flags.format))) {
+      throw new UserError(`--format must be "agent" or "human"`, EXIT_USAGE)
+    }
+  }
   const [name = 'help', ...rest] = positional
 
   rejectEmptyBooleans(flags)

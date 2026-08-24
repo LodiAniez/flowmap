@@ -346,3 +346,17 @@ test('a repeated --branch on repo add is rejected rather than dropped', () => {
   assert.equal(r.code, 2)
   assert.match(r.err, /more than once/)
 })
+
+// --format was the one value flag with no guard, and isAgentFormat tests `=== 'agent'` — so
+// `--format=` (unset shell variable) silently returned colourised prose to a TSV parser.
+test('an invalid, empty or repeated --format is rejected', () => {
+  for (const argv of [
+    ['verify', '--format='],
+    ['verify', '--format=agent', '--format=agent'],
+    ['verify', '--format=nonsense'],
+  ]) {
+    const r = flowmap(...argv)
+    assert.equal(r.code, 2, `flowmap ${argv.join(' ')} must not fall through to human output`)
+  }
+  assert.equal(flowmap('verify', '--format=agent').code, 0, 'and the valid spelling still works')
+})

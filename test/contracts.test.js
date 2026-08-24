@@ -464,3 +464,18 @@ test('an extensionless import resolves to every extension the tool accepts', () 
     assert.deepEqual(r.missing, ['absent'])
   }
 })
+
+// contractFields was hardened against a malformed `fields`, but not against a malformed field
+// *name*: an array name reached String.prototype.split and crashed a command documented as
+// never failing.
+test('a malformed field name is coerced, not thrown', async () => {
+  const { normalizeField } = await import('../lib/fields.js')
+  assert.equal(normalizeField({ name: ['order', 'total'] }).name, 'order,total')
+  assert.equal(normalizeField({ name: 5 }).name, '5')
+  assert.equal(normalizeField({ name: null }).name, '[object Object]')
+
+  for (const fields of [[{ name: ['a', 'b'] }], [{ name: 5 }], [{ name: {} }]]) {
+    assert.doesNotThrow(() => check({ schema: 'src/standalone.ts', fields }),
+      `fields=${JSON.stringify(fields)} must not throw`)
+  }
+})
