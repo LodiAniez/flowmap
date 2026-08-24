@@ -307,3 +307,28 @@ test('an import written with its extension does not collapse the cone', async ()
   assert.equal(sparse, 'true', 'the cone must survive an extension-carrying import')
   assert.ok(!existsSync(join(dir, 'src', 'bulk', 'filler.ts')), 'and still exclude unrelated files')
 })
+
+// The cone builder must follow every import form the checker does. $ref was added to the
+// checker one round before the cone, so a JSON Schema referencing a sibling directory had that
+// file left unfetched and every real verdict downgraded to "could not tell".
+test('the cone fetches JSON Schema $ref targets the checker follows', async () => {
+  const { verify } = await import('../lib/verify.js')
+  const up = realRepo('refcone', {
+    'src/api/handler.ts': 'export function handle() {}\n',
+    'common/money.json': '{"properties":{"amount":{"type":"number"}}}',
+    'schemas/order.json': '{"properties":{"id":{"type":"string"},"m":{"$ref":"../common/money.json"}}}',
+  })
+  const map = {
+    repos: { refcone: { url: up, branch: 'main' } },
+    contracts: { order: { kind: 'event', schema: 'schemas/order.json', fields: ['amount', 'absent'] } },
+    journeys: { flow: { hops: [{ repo: 'refcone', reads: 'src/api/handler.ts::handle', outbound: 'order' }] } },
+    verified: {},
+  }
+  const mapPath = join(root, 'flowmap-refcone.json')
+  writeFileSync(mapPath, JSON.stringify(map))
+
+  const r = verify(root, map, mapPath)
+  const order = r.contracts.find((x) => x.id === 'order')
+  assert.equal(order.status, c.FIELDS_MISSING, 'the referenced file must have been fetched')
+  assert.deepEqual(order.missing, ['absent'], 'and `amount` found through the $ref')
+})

@@ -525,3 +525,27 @@ test('a commented-out import does not blunt the check', () => {
   assert.equal(r.status, FIELDS_MISSING, 'dead imports hide nothing')
   assert.deepEqual(r.missing, ['nowhere'])
 })
+
+// The deferred last-round judgement dropped the bindingless half of the rule, so the same
+// unfollowable include hid the shape at depth 2 and was invisible at depth 3 — the verdict
+// depended on how deep the include happened to sit.
+test('a bindingless include hides the shape at any depth', async () => {
+  const { IMPORT_DEPTH } = await import('../lib/contracts.js')
+  mkdirSync(join(repo, 'src', 'depths'), { recursive: true })
+
+  // Place the same include at each level of a chain as long as the walk.
+  for (let at = 1; at <= IMPORT_DEPTH; at++) {
+    for (let i = 1; i <= IMPORT_DEPTH; i++) {
+      const include = i === at ? 'import "google/protobuf/timestamp.proto"\n' : ''
+      const next = i < IMPORT_DEPTH ? `export * from './d${i + 1}.js'\n` : ''
+      writeFileSync(join(repo, 'src', 'depths', `d${i}.ts`), `${include}${next}export const L${i} = 1\n`)
+    }
+    writeFileSync(join(repo, 'src', 'depths', 'entry.ts'), "export * from './d1.js'\n")
+
+    assert.equal(
+      check({ schema: 'src/depths/entry.ts', fields: ['nowhere'] }).status,
+      INCONCLUSIVE,
+      `an unfollowable include at level ${at} must hide the shape`
+    )
+  }
+})

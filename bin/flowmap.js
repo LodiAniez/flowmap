@@ -15,6 +15,11 @@ import { renderJourney, acceptDraft, loadDraft } from '../lib/journey.js'
 import { mermaid, markdownDoc } from '../lib/diagram.js'
 import { journey as resolveJourney, impact as resolveImpact, journeyRow, impactRow } from '../lib/graph.js'
 import { verify as runVerify, verifyRow, contractRows } from '../lib/verify.js'
+// Imported rather than compared as literals: a changed constant should break the build, not
+// silently stop the CLI emitting these rows.
+import {
+  UNSEARCHED, AMBIGUOUS, INCONCLUSIVE, FIELDS_MISSING, SCHEMA_NOT_FOUND, MALFORMED_FIELDS,
+} from '../lib/contracts.js'
 import { writeScaffold } from '../lib/scaffold.js'
 import { discover, repoRoot } from '../lib/discover.js'
 import { serve } from '../lib/server.js'
@@ -605,9 +610,7 @@ function verifyCmd(args, flags) {
       // In-scope contracts whose verdict is itself "we did not check this". `take()` excludes
       // them from the buckets below precisely because they are in scope, so without this a run
       // reporting only these writes an empty TSV that reads as clean.
-      ...result.contracts.filter(
-        (c) => c.status === 'schema-repo-not-synced' || c.status === 'schema-ambiguous'
-      ),
+      ...result.contracts.filter((c) => c.status === UNSEARCHED || c.status === AMBIGUOUS),
       ...(result.contractsStranded ?? []).map((id) => ({ id, status: 'repo-unreachable', missing: [] })),
       ...(result.contractsOutOfScope ?? []).map((id) => ({ id, status: 'out-of-scope', missing: [] })),
       ...(result.contractsUnregistered ?? []).map((id) => ({ id, status: 'repo-unregistered', missing: [] })),
@@ -723,7 +726,11 @@ function verifyCmd(args, flags) {
     // its repo could not be cloned, or because the checkout came up short, says nothing about
     // whether the map is right — and sending someone to re-draft a correct journey is the
     // misdirection this branch exists to avoid.
-    const localFailure = stale.length > 0 || result.repos.some((r) => r.error)
+    // A repo absent from the registry is a map defect, not something a retry fixes — the same
+    // split lib/verify.js makes between failedRepos and unregisteredRepos.
+    const localFailure =
+      stale.length > 0 ||
+      result.repos.some((r) => r.error && r.error !== 'not in the repos registry')
     process.stdout.write(
       localFailure
         ? dim('\n  Some repos could not be read in full, so these may simply not have been\n') +
@@ -733,7 +740,7 @@ function verifyCmd(args, flags) {
   } else if (result.rows.length) {
     process.stdout.write(`\n  ${green('every anchor resolves.')}\n`)
   }
-  const suppressed = result.contracts.filter((c) => c.status === 'schema-repo-not-synced')
+  const suppressed = result.contracts.filter((c) => c.status === UNSEARCHED)
   if (suppressed.length && result.contractsSuppressedReason) {
     process.stdout.write(
       `  ${yellow(`${suppressed.length} contract(s) not checked:`)} ${result.contractsSuppressedReason}\n` +
@@ -751,7 +758,7 @@ function verifyCmd(args, flags) {
         dim('  no hop names them and no contract schema lives there — flowmap repo remove <id>\n')
     )
   }
-  const ambiguous = result.contracts.filter((c) => c.status === 'schema-ambiguous')
+  const ambiguous = result.contracts.filter((c) => c.status === AMBIGUOUS)
   for (const c of ambiguous) {
     process.stdout.write(
       `  ${yellow('ambiguous schema:')} ${c.id} — ${c.path} exists in ${c.repos.join(', ')}\n` +
@@ -762,10 +769,10 @@ function verifyCmd(args, flags) {
     // An explicit split, not a subtraction: folding every other status into "could not be
     // confirmed" described a definitely-malformed map as one flowmap was unsure about.
     const count = (status) => result.contractIssues.filter((c) => c.status === status).length
-    const definite = count('fields-missing')
-    const absent = count('schema-not-found')
-    const malformed = count('fields-malformed')
-    const unsure = count('schema-inconclusive')
+    const definite = count(FIELDS_MISSING)
+    const absent = count(SCHEMA_NOT_FOUND)
+    const malformed = count(MALFORMED_FIELDS)
+    const unsure = count(INCONCLUSIVE)
     const other = result.contractIssues.length - definite - absent - malformed - unsure
     const parts = [
       definite ? `${definite} disagree with their schema` : '',
@@ -776,7 +783,7 @@ function verifyCmd(args, flags) {
     ]
     process.stdout.write(`\n  ${yellow(`contracts: ${parts.filter(Boolean).join(', ')}`)}\n`)
     for (const c of result.contractIssues) {
-      if (c.status === 'schema-inconclusive') {
+      if (c.status === INCONCLUSIVE) {
         // A flagged unknown must not read as a finding — that is the whole point of the
         // status. The schema composes from something we could not read.
         process.stdout.write(`    ${cyan(c.id)} ${dim(`— ${c.path}`)}\n`)
