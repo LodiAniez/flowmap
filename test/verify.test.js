@@ -419,3 +419,27 @@ test('registry entries nothing uses are reported', async () => {
   assert.deepEqual(unusedRepos(map), ['nobody'],
     'svc hosts a hop and holder owns a schema; only nobody is dead weight')
 })
+
+// Telling someone to remove the repo their schemas live in would break their map. A bare
+// schema path does not name its repo, so "nothing uses it" cannot be known from the map alone.
+test('a repo holding a bare-path schema is never reported as unused', async () => {
+  const { unusedRepos } = await import('../lib/verify.js')
+  const map = {
+    repos: { svc: {}, contractsPkg: {} },
+    contracts: { c: { schema: 'src/schemas/order.ts', fields: [] } },
+    journeys: { flow: { hops: [{ repo: 'svc', reads: 'a.ts::b', outbound: 'c' }] } },
+  }
+  assert.deepEqual(unusedRepos(map), [], 'without knowing where the schema resolved, claim nothing')
+  assert.deepEqual(unusedRepos(map, { foundIn: ['contractsPkg'] }), [],
+    'and once we know, the holder is used')
+})
+
+test('a genuinely unused repo is still reported when every schema names its repo', async () => {
+  const { unusedRepos } = await import('../lib/verify.js')
+  const map = {
+    repos: { svc: {}, holder: {}, nobody: {} },
+    contracts: { c: { schema: 'holder/src/x.ts', fields: [] } },
+    journeys: { flow: { hops: [{ repo: 'svc', reads: 'a.ts::b' }] } },
+  }
+  assert.deepEqual(unusedRepos(map), ['nobody'])
+})

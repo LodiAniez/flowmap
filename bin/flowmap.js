@@ -85,7 +85,17 @@ function ensureSynced(root, map, ids, flags, mode = 'full', { widen = false } = 
 // pulls what the journey needs first — and only what it needs.
 function syncForJourney(root, map, journey, flags) {
   const ids = [...new Set((journey.hops ?? []).map((h) => h.repo).filter((id) => map.repos[id]))]
-  if (ids.length) ensureSynced(root, map, ids, flags)
+  if (!ids.length) return []
+  // Widen: verify's cone is built from the journeys already in the map, so it cannot contain
+  // a draft's anchors. Resolving them against a checkout verify narrowed reports files that
+  // exist as missing, and finalize then refuses the draft with nothing explaining why.
+  const synced = ensureSynced(root, map, ids, flags, 'full', { widen: true })
+  for (const r of synced.filter((x) => x.narrowed)) {
+    process.stderr.write(
+      yellow(`warning: ${r.id} is a partial checkout — anchors there may report as missing\n`) + narrowedHint(r)
+    )
+  }
+  return synced
 }
 
 // ---------------------------------------------------------------- draft journey

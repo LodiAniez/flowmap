@@ -334,3 +334,46 @@ test('a repeated import of an already-read file is not counted as unknown', () =
   assert.equal(r.status, FIELDS_MISSING, 'everything was read, so absence is real')
   assert.deepEqual(r.missing, ['absent'])
 })
+
+// A dotted lowercase name is a topic or message, not a file. Treating one as a path produced
+// a false "schema not found" and made a full run sweep the registry hunting for it.
+test('a dotted topic or message name is not a file path', () => {
+  for (const ref of ['orders.created', 'user.updated', 'order.v1', 'mryum.bill.event']) {
+    assert.equal(parseSchemaRef(ref, ['svc']).kind, NOT_A_PATH, `${ref} is not a file`)
+  }
+})
+
+test('real file extensions are still recognised without a directory', () => {
+  for (const ref of ['schema.gql', 'order.proto', 'types.ts', 'events.avsc', 'schema.GQL']) {
+    assert.equal(parseSchemaRef(ref, ['svc']).kind, 'path', `${ref} is a file`)
+  }
+})
+
+// CJS composes exactly as ESM does; not reading its bindings meant a package that hides the
+// shape produced a confident "field missing".
+test('a package composed in through require() is inconclusive', () => {
+  writeFileSync(join(repo, 'src', 'cjs.ts'),
+    "const { BaseOrder } = require('@acme/schemas')\nexport const S = BaseOrder.extend({ own: 1 })\n")
+  assert.equal(check({ schema: 'src/cjs.ts', fields: ['own', 'total'] }).status, INCONCLUSIVE)
+})
+
+test('a package composed in through dynamic import is inconclusive', () => {
+  writeFileSync(join(repo, 'src', 'dyn2.ts'),
+    "const { BaseOrder } = await import('@acme/schemas')\nexport const S = BaseOrder.extend({ own: 1 })\n")
+  assert.equal(check({ schema: 'src/dyn2.ts', fields: ['own', 'total'] }).status, INCONCLUSIVE)
+})
+
+// Two files discovered on the final round, one importing the other: the verdict must not
+// depend on which was visited first.
+test('the verdict does not depend on sibling visit order', () => {
+  mkdirSync(join(repo, 'src', 'order'), { recursive: true })
+  writeFileSync(join(repo, 'src', 'order', 'y.ts'), 'export const Y = z.object({ fromY: z.string() })\n')
+  writeFileSync(join(repo, 'src', 'order', 'x.ts'), "export * from './y.js'\n")
+  // Both x and y are reachable at the last level; x imports y.
+  writeFileSync(join(repo, 'src', 'order', 'index.ts'), "export * from './x.js'\nexport * from './y.js'\n")
+  writeFileSync(join(repo, 'src', 'orderentry.ts'), "export * from './order/index.js'\n")
+
+  const r = check({ schema: 'src/orderentry.ts', fields: ['fromY', 'absent'] })
+  assert.equal(r.status, FIELDS_MISSING, 'the graph is fully read either way round')
+  assert.deepEqual(r.missing, ['absent'])
+})
