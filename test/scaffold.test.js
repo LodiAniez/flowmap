@@ -174,3 +174,30 @@ test('registering a local repo stores it relative, and sync can still find it', 
   assert.ok(!entry.url.startsWith('/'), `expected a relative url, got ${entry.url}`)
   assert.equal(fromPortable(ctx, entry.url), repo, 'and it resolves back to the real repo')
 })
+
+// A clone URL is portable already and is not a path. Resolving one against a root reads the
+// scheme as a directory and yields `<root>/https:/github.com/...`, which git cannot clone.
+// This only ever bit on a *cold* cache — syncRepo uses the stored source solely on a fresh
+// clone, so a warm cache hid it completely.
+test('a remote url survives the portable round-trip untouched', () => {
+  const root = '/Users/someone/repos/ctx'
+  for (const url of [
+    'https://github.com/acme/orders-api.git',
+    'git@github.com:acme/orders-api.git',
+    'ssh://git@host/x.git',
+    'git://host/x.git',
+    'http://internal/x.git',
+  ]) {
+    assert.equal(fromPortable(root, url), url, `${url} must not be resolved as a path`)
+    assert.equal(toPortable(root, url), url, `${url} must not be relativised`)
+  }
+})
+
+test('display leaves a remote url alone', () => {
+  assert.equal(display('/a/b', 'https://github.com/acme/x.git'), 'https://github.com/acme/x.git')
+})
+
+test('paths are still treated as paths after the url guard', () => {
+  assert.equal(fromPortable('/a/b', '../c'), '/a/c')
+  assert.equal(toPortable('/a/b', '/a/b/d'), 'd')
+})
