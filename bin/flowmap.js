@@ -496,7 +496,8 @@ function verifyCmd(args, flags) {
   } else {
     process.stdout.write(`\n  ${green('every anchor resolves.')}\n`)
   }
-  if (result.contractsSuppressedBy?.length && result.contracts.length) {
+  const suppressed = result.contracts.some((c) => c.status === 'schema-repo-not-synced')
+  if (result.contractsSuppressedBy?.length && suppressed) {
     process.stdout.write(
       `  ${yellow('contract checks inconclusive:')} could not reach ${result.contractsSuppressedBy.join(', ')}\n` +
         dim('  a schema absent from the repos we could read is not proof it is absent\n')

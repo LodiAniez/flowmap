@@ -243,3 +243,28 @@ test('composition through a namespace import is seen', () => {
     "import * as Shared from '@acme/shared-schemas'\nexport const S = Shared.Base.extend({ own: 1 })\n")
   assert.equal(check({ schema: 'src/ns.ts', fields: ['own', 'total'] }).status, INCONCLUSIVE)
 })
+
+// A schema registry url or broker address is not a file. Treating one as a repo-relative path
+// produced a red "schema file not found" for a perfectly valid contract.
+test('a url-shaped schema ref is not treated as a path', () => {
+  for (const ref of ['https://schemas.acme.com/order.json', 'kafka://orders/v1', 's3://bucket/x.json']) {
+    assert.equal(parseSchemaRef(ref, ['svc']).kind, NOT_A_PATH, `${ref} must not be opened as a file`)
+  }
+})
+
+test('a non-string schema is reported, not thrown', () => {
+  assert.equal(parseSchemaRef(5, ['svc']).kind, NOT_A_PATH)
+  assert.equal(parseSchemaRef({ path: 'x' }, ['svc']).kind, NOT_A_PATH)
+  assert.doesNotThrow(() => check({ schema: 5, fields: ['x'] }))
+})
+
+// Combinator style hides an imported shape exactly as much as `.extend()` does.
+test('combinator composition from a package is inconclusive', () => {
+  writeFileSync(join(repo, 'src', 'combi.ts'),
+    "import { BaseOrder } from '@acme/shared'\nexport const S = z.intersection(BaseOrder, z.object({ note: z.string() }))\n")
+  assert.equal(check({ schema: 'src/combi.ts', fields: ['note', 'fromBase'] }).status, INCONCLUSIVE)
+
+  writeFileSync(join(repo, 'src', 'uni.ts'),
+    "import { BaseOrder } from '@acme/shared'\nexport const S = z.union([BaseOrder, z.object({ note: z.string() })])\n")
+  assert.equal(check({ schema: 'src/uni.ts', fields: ['note', 'fromBase'] }).status, INCONCLUSIVE)
+})

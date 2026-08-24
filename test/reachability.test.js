@@ -279,3 +279,31 @@ test('the cone reaches as deep as the import walk', async () => {
     'a chain the walk can follow must also be a chain the cone fetched')
   assert.deepEqual(order.missing, ['absent'], 'the deepest field must have been reachable')
 })
+
+// A cone entry that is really a file fails the whole `sparse-checkout set`, and the fallback
+// disables sparse permanently — nothing re-narrows a checkout that is no longer sparse. One
+// `./base.ts` import was enough to fetch an entire repo, every run, for good.
+test('an import written with its extension does not collapse the cone', async () => {
+  const { verify } = await import('../lib/verify.js')
+  const up = realRepo('extimport', {
+    'src/api/handler.ts': 'export function handle() {}\n',
+    'src/schemas/base.ts': 'export const Base = z.object({ total: z.number() })\n',
+    // The spelling NodeNext, Deno and Bun all accept.
+    'src/schemas/order.ts': "import { Base } from './base.ts'\nexport const Order = Base\n",
+    'src/bulk/filler.ts': 'export const filler = 1\n',
+  })
+  const map = {
+    repos: { extimport: { url: up, branch: 'main' } },
+    contracts: { order: { kind: 'event', schema: 'src/schemas/order.ts', fields: ['total'] } },
+    journeys: { flow: { hops: [{ repo: 'extimport', reads: 'src/api/handler.ts::handle', outbound: 'order' }] } },
+    verified: {},
+  }
+  const mapPath = join(root, 'flowmap-extimport.json')
+  writeFileSync(mapPath, JSON.stringify(map))
+
+  verify(root, map, mapPath)
+  const dir = join(root, '.flowmap-cache', 'extimport')
+  const sparse = gitRun(['config', 'core.sparseCheckout'], dir).trim()
+  assert.equal(sparse, 'true', 'the cone must survive an extension-carrying import')
+  assert.ok(!existsSync(join(dir, 'src', 'bulk', 'filler.ts')), 'and still exclude unrelated files')
+})

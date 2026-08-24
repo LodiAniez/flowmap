@@ -235,7 +235,9 @@ per-language parser.
 
 The first version of this was worse than useless. Schemas compose, so
 `VelocityMembershipSchema.omit(...)` puts the field names one file away, and searching only
-the named file reported real contracts as broken. It now follows relative imports two levels.
+the named file reported real contracts as broken. It now follows relative imports three levels — measured, not chosen: on a real contracts
+package depth 2 gave a definite verdict on 3 of 7 contracts and depth 3 on 4 of 7, with no
+further gain at 4 or 6.
 Where a schema *also* composes from a package it cannot read, the contract is reported
 inconclusive rather than failing: an unreadable dependency means "cannot tell", and dressing
 that up as "field is missing" is the confident-wrong-answer failure this tool exists to avoid.
