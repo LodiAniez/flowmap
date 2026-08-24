@@ -28,7 +28,8 @@ const { checkContract, parseSchemaRef, SCHEMA_OK, FIELDS_MISSING, SCHEMA_NOT_FOU
 
 const map = { repos: { svc: {} }, contracts: {}, journeys: {} }
 const check = (contract) => checkContract(root, map, 'c', contract)
-const checkContractWith = (m, contract, synced) => checkContract(root, m, 'c', contract, { synced })
+const checkContractWith = (m, contract, synced, scoped = false) =>
+  checkContract(root, m, 'c', contract, { synced, scoped })
 
 test('parses the three schema reference shapes', () => {
   assert.deepEqual(parseSchemaRef('src/x.ts', ['svc']), { kind: 'path', repo: null, path: 'src/x.ts', symbol: null })
@@ -108,19 +109,15 @@ test('searching every candidate repo and not finding the schema is a finding', (
 
 // The --local / --repos case: a hop tells us which repo owns the contract, and that repo was
 // not synced. The question is genuinely open.
-test('an unsynced repo that a hop points at leaves the question open', () => {
-  const withHops = {
-    repos: { svc: {}, owner: {} },
-    contracts: {},
-    journeys: { flow: { hops: [{ repo: 'owner', inbound: 'c', reads: 'x.ts::y' }] } },
-  }
-  const r = checkContractWith(withHops, { schema: 'src/nowhere.ts', fields: ['x'] }, new Set(['svc']))
-  assert.equal(r.status, UNSEARCHED, 'owner was never looked in')
+test('a scoped run leaves the question open rather than accusing', () => {
+  const m = { repos: { svc: {}, owner: {} }, contracts: {}, journeys: {} }
+  const r = checkContractWith(m, { schema: 'src/nowhere.ts', fields: ['x'] }, new Set(['svc']), true)
+  assert.equal(r.status, UNSEARCHED, 'a scoped run deliberately skipped repos')
 })
 
 // The counterpart, and the one that made the real verdict unreachable: when nothing points
 // anywhere the candidate set is a guess, and a guess must not excuse the search.
-test('a guessed sweep that found nothing is a finding, not an excuse', () => {
+test('a full run that found nothing is a finding, not an excuse', () => {
   const noHops = { repos: { svc: {}, extra: {} }, contracts: {}, journeys: {} }
   const r = checkContractWith(noHops, { schema: 'src/nowhere.ts', fields: ['x'] }, new Set(['svc']))
   assert.equal(r.status, SCHEMA_NOT_FOUND, 'a hopless repo must not hide a real miss')
