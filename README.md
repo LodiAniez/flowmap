@@ -30,12 +30,12 @@ searches a default branch **without checking it out**, so scanning fifty neighbo
 couple of seconds and clones nothing. Only the repos that matched get cloned.
 
 ```
-$ flowmap draft journey supported-features --seed supportedFeatures
-scanning repos beside loyalty-connector for supportedFeatures…
-discovered 3 of 54 repos: loyalty-connector (start), manage-frontend 12, manage 3
+$ flowmap draft journey checkout --seed order.created
+scanning repos beside orders-api for order.created…
+discovered 3 of 54 repos: orders-api (start), fulfilment 12, billing 3
   not on their default branch, only on the branch checked out locally:
-    loyalty-contract  1 hit(s) on feature/loy2-1119-…
-drafted supported-features -> drafts/supported-features.json
+    notifications  1 hit(s) on feature/order-emails
+drafted checkout -> drafts/checkout.json
 
   3 repo(s), 15 candidate file(s), 63 anchor(s) ready to use
 ```
@@ -57,7 +57,7 @@ pin a scope by hand, but you rarely need them.
 | `visualize` | built |
 | `search`, `sync` | built |
 | `journey`, `impact` | built |
-| `verify` | not built — build order step 3 |
+| `verify` | built |
 
 ## Install
 
@@ -152,8 +152,8 @@ Refuses to overwrite an existing map without `--force`; skip self-registration w
 
 ```
 $ flowmap init
-created /Users/you/code/deckster/flowmap.json
-added   deckster -> https://github.com/you/deckster.git (master)
+created ~/code/orders-api/flowmap.json
+added   orders-api -> git@github.com:acme/orders-api.git (main)
 ```
 
 ### `flowmap repo add [<id> <url-or-path>]`
@@ -162,8 +162,8 @@ Register a repo. With no arguments it detects the git repo you are standing in, 
 its origin URL and default branch.
 
 ```
-$ flowmap repo add orders-api ~/code/orders-api
-added orders-api -> /Users/you/code/orders-api (master)
+$ flowmap repo add fulfilment ~/code/fulfilment
+added fulfilment -> git@github.com:acme/fulfilment.git (main)
 ```
 
 Also `flowmap repo list` and `flowmap repo remove <id>`. Pass `--branch <name>` to override
@@ -229,9 +229,10 @@ The ordered hops. This is the cheap read path — it touches `flowmap.json` and 
 no sync, no network, no checkouts.
 
 ```
-$ flowmap journey velocity --format=agent
-1	serve-frontend	-	gql.linkVelocityMembership	…::VelocityLinkingForm	…::VelocityAccountLink	unverified
-2	serve-api	gql.linkVelocityMembership	http.velocity.membership.link	…::LoyaltyVelocityResolver	…::LoyaltyVelocityService	unverified
+$ flowmap journey checkout --format=agent
+1	storefront	-	gql.createOrder	…::CheckoutForm	…::submitOrder	ok
+2	orders-api	gql.createOrder	event.order.created	…::CheckoutResolver	…::publishOrderCreated	ok
+3	fulfilment	event.order.created	-	…::onOrderCreated	-	unverified
 ```
 
 Bare `flowmap journey` lists the journeys in the map.
@@ -242,11 +243,11 @@ Every hop that carries a field, on both sides — a field arriving and a field l
 different edit sites.
 
 ```
-$ flowmap impact membershipId
-membershipId — 5 hop(s) across 1 journey(s)
+$ flowmap impact order.total
+order.total — 4 hop(s) across 2 journey(s)
 
-  gql.linkVelocityMembership membershipId: string
-  http.velocity.membership.link membershipId: string
+  gql.createOrder order.total: number
+  event.order.created order.total: number
   …
 ```
 
@@ -282,13 +283,50 @@ the draft.
 
 ```
 $ flowmap finalize journey checkout
-finalized checkout — 2 hops -> /Users/you/code/ctx/flowmap.json
+finalized checkout — 2 hops -> flowmap.json
   added contracts: event.order.created
   1 hop(s) were marked unsure by the drafter — worth a second look
 ```
 
 Refuses if an anchor does not resolve — data integrity, not gating; no build or merge is
 affected. `--force` overrides, `--keep-draft` keeps the file.
+
+### `flowmap verify`
+
+Re-check every anchor in the map against the repos' current default branches, and record
+what was seen.
+
+```
+$ flowmap verify
+  ok  storefront  2/2 anchors  main @ 7f1662b
+  ok  orders-api  2/2 anchors  main @ f181d5b
+  !!  fulfilment  3/5 anchors  main @ 2b9dad8
+      moved 4c81e0a -> 2b9dad8 since 2026-05-01
+
+  2 anchor(s) no longer resolve:
+    checkout hop 3 reads  fulfilment  …::onOrderCreated
+      symbol not found
+```
+
+It syncs **sparse** — only the files the anchors name plus each contract's schema — so it
+pulls kilobytes per repo, not a clone. Roughly 8 seconds across three repos.
+
+Afterwards `journey` and `impact` report `status: ok` instead of `unverified`, and the
+`verified` block in `flowmap.json` records the branch, sha, date and anchor tally per repo.
+
+Because the sha is recorded, a re-run answers a better question than pass/fail: it
+distinguishes *"this moved since we last looked, here is the range"* from *"this never
+resolved, the map is wrong"*.
+
+| flag | |
+| --- | --- |
+| `--local` | only this repo's anchors — the PR-time scope, where every finding is something the author could have caused |
+| `--repos a,b` | scope to specific repos |
+| `--journey <name>` | scope to one journey |
+| `--format=agent` | tab-separated; **only the failures**, since a clean anchor is not news |
+
+**It never fails.** Findings exit 0, like everything else here. A broken anchor means the
+map is out of date, not that someone's build should stop.
 
 ### `flowmap visualize`
 
@@ -380,15 +418,15 @@ header. Cells never contain tabs or newlines.
 | --- | --- |
 | `journey` | `hop`, `repo`, `inbound`, `outbound`, `reads`, `writes`, `status` |
 | `impact` | `journey`, `hop`, `repo`, `side`, `contract`, `field`, `reads`, `writes`, `status` |
+| `verify` | `repo`, `journey`, `hop`, `side`, `anchor`, `status`, `line` |
 | `search` | `repo`, `path`, `line`, `text` |
 | `draft --check` | `hop`, `repo`, `side`, `anchor`, `status`, `line` |
 
 A missing value renders as `-`, never as an empty cell, so columns never shift.
 
 `status` on `journey` and `impact` is `ok`, `stale` (verified over 90 days ago) or
-`unverified` (never checked). It is `unverified` for everything until `flowmap verify`
-exists — which is honest: an agent must be able to tell a checked hop from an unchecked one
-before deciding whether to trust it.
+`unverified` (never checked). Run `flowmap verify` to turn `unverified` into `ok` — an agent
+must be able to tell a checked hop from an unchecked one before deciding whether to trust it.
 
 `status` is one of `ok`, `symbol-missing`, `file-missing`, `repo-missing`, `malformed`,
 `absent`.

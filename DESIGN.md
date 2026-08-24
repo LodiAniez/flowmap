@@ -355,8 +355,9 @@ Strictly sequential. Each step must pay for itself before the next.
    step 1's human check is the only thing keeping this gate honest. Skip it and the gate
    measures whether a model agrees with itself.
 3. `flowmap verify` — sync the involved repos to default branch, resolve anchors, write the
-   `verified` block. Buildable this early precisely because no other repo has to adopt
-   anything first.
+   `verified` block. **Built.** Buildable this early precisely because no other repo has to
+   adopt anything first. Sparse-syncs only the anchored paths and each contract's schema, so
+   the cost stays in kilobytes per repo.
 4. Expand to the three or four journeys covering the most cross-repo work. Confirms the
    model fits the real codebase, which is the thing per-repo cards were meant to prove.
 5. Run `verify` on a schedule and route drift to a human as a report. PR-time comment for
