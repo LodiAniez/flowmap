@@ -67,29 +67,35 @@ function scopeFor(map, flags, purpose) {
 }
 
 function ensureSynced(root, map, ids, flags, mode = 'full', { widen = false } = {}) {
+  let offline = false
   const missing = ids.filter((id) => !isSynced(root, id))
   if (flags['no-sync'] === true) {
     if (missing.length) {
       throw new UserError(`not synced: ${missing.join(', ')}\nDrop --no-sync or run \`flowmap sync\`.`)
     }
-    // Widening a blobless sparse clone has to fetch, which --no-sync promised not to do.
+    // Widening a blobless sparse clone has to fetch, which --no-sync promised not to do — and
+    // so does re-fetching after a changed origin url.
     widen = false
+    offline = true
   }
   if (missing.length) {
     process.stderr.write(dim(`syncing ${missing.length} repo(s): ${missing.join(', ')}\n`))
   }
-  return syncMany(root, map, ids, { mode, widen, refresh: flags.refresh === true })
+  return syncMany(root, map, ids, { mode, widen, offline, refresh: flags.refresh === true })
 }
 
 // Anchors can only be resolved against real checkouts, so any command that resolves them
 // pulls what the journey needs first — and only what it needs.
-function syncForJourney(root, map, journey, flags) {
-  const ids = [...new Set((journey.hops ?? []).map((h) => h.repo).filter((id) => map.repos[id]))]
+function syncForJourney(root, map, journey, flags, { widen = true } = {}) {
+  // A hand-edited draft can carry anything here; checkDraft guards the same way, and this runs
+  // before it now.
+  const hops = Array.isArray(journey?.hops) ? journey.hops : []
+  const ids = [...new Set(hops.map((h) => h?.repo).filter((id) => id && map.repos[id]))]
   if (!ids.length) return []
   // Widen: verify's cone is built from the journeys already in the map, so it cannot contain
   // a draft's anchors. Resolving them against a checkout verify narrowed reports files that
   // exist as missing, and finalize then refuses the draft with nothing explaining why.
-  const synced = ensureSynced(root, map, ids, flags, 'full', { widen: true })
+  const synced = ensureSynced(root, map, ids, flags, widen ? 'full' : 'sparse', { widen })
   for (const r of synced.filter((x) => x.narrowed)) {
     process.stderr.write(
       yellow(`warning: ${r.id} is a partial checkout — anchors there may report as missing\n`) + narrowedHint(r)
@@ -277,8 +283,12 @@ function checkJourney(feature, flags) {
 function showJourney(feature, flags) {
   if (!feature) throw new UserError('usage: flowmap show journey <feature>', EXIT_USAGE)
   const { map, root } = loadMap()
-  const journey = map.journeys[feature] ?? loadDraft(root, feature).draft
-  syncForJourney(root, map, journey, flags)
+  const accepted = map.journeys[feature]
+  const journey = accepted ?? loadDraft(root, feature).draft
+  // Only a draft needs widening: verify's cone is built from the accepted journeys, so it
+  // already covers this one's anchors. Widening anyway would disable sparse on every hop repo
+  // for a read-only command.
+  syncForJourney(root, map, journey, flags, { widen: !accepted })
 
   if (flags.mermaid === true) {
     process.stdout.write(mermaid(map, feature, journey) + '\n')
@@ -516,6 +526,18 @@ function verifyCmd(args, flags) {
     }
   }
 
+  const stale = result.repos.filter((r) => r.narrowed)
+  if (stale.length) {
+    process.stdout.write(
+      `\n  ${yellow(`${stale.length} checkout(s) are incomplete: ${stale.map((r) => r.id).join(', ')}`)}\n` +
+        dim('  anchors reported missing there may simply not have been fetched\n')
+    )
+  }
+  if (result.contractsStranded?.length) {
+    process.stdout.write(
+      `  ${yellow(`${result.contractsStranded.length} contract(s) not checked:`)} carried only by hops in a repo that failed to sync\n`
+    )
+  }
   if (result.broken.length) {
     process.stdout.write(`\n  ${yellow(`${result.broken.length} anchor(s) no longer resolve:`)}\n`)
     for (const b of result.broken) {

@@ -166,3 +166,14 @@ test('an empty scope flag value is rejected like a missing one', () => {
     assert.match(r.err, /needs a value/)
   }
 })
+
+// checkJourney now syncs before checkDraft, so a hand-edited draft with a non-array `hops`
+// reaches syncForJourney first and must not crash with a raw TypeError.
+test('a malformed draft reports rather than crashing', () => {
+  const dir = join(root, 'drafts')
+  mkdirSync(dir, { recursive: true })
+  writeFileSync(join(dir, 'broken.json'), JSON.stringify({ name: 'broken', hops: {} }))
+  const r = flowmap('draft', '--check', 'broken', { mapPath: join(root, 'flowmap.json') })
+  assert.notEqual(r.code, 1, 'a map defect is not an internal error')
+  assert.doesNotMatch(r.err, /is not a function/, 'and never a raw TypeError')
+})

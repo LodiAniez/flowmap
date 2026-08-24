@@ -308,8 +308,9 @@ $ flowmap verify
       symbol not found
 ```
 
-It syncs **sparse** in two passes: the directories the anchors and schemas name, then — after
-reading what landed — exactly the directories those schemas import from. Measured across ten
+It syncs **sparse**, one pass per import level: the directories the anchors and schemas name,
+then — after reading what landed — exactly the directories those schemas import from, repeated
+until the walk depth is covered. Measured across ten
 real repos that is 17MB and 1–17% of each large repo, against 96MB if the cone is simply
 widened to the top-level directory. A *full* run also touches every registered repo, because
 only a full run is entitled to say a schema exists nowhere; a scoped run stays within its

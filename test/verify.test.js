@@ -463,3 +463,38 @@ test('a partially-resolved bare-path map reports no unused repos', async () => {
   const complete = unusedRepos(map, { foundIn: ['api', 'loyalty-contracts'], bareResolved: true })
   assert.deepEqual(complete, [], 'and once both resolve, both repos are in use')
 })
+
+// not-found and ambiguous carry no missing fields, so counting only "SCHEMA_OK or missing"
+// made them look like no work at all — and the CLI then reported "nothing to verify" over a
+// real finding.
+test('a contract verdict counts as work even when it lists no missing fields', () => {
+  const map = {
+    repos: { svc: { url: upstream, branch: 'main' } },
+    contracts: { 'order.created': { kind: 'event', schema: 'src/schemas/gone.ts', fields: ['x'] } },
+    verified: {},
+    // Hops carry the contract but have no anchors, so rows will be empty.
+    journeys: { flow: { hops: [{ repo: 'svc', outbound: 'order.created' }] } },
+  }
+  const mapPath = join(root, 'flowmap-contract-only.json')
+  writeFileSync(mapPath, JSON.stringify(map))
+
+  const result = verify(root, map, mapPath)
+  assert.ok(result.contractIssues.length, 'the missing schema is a finding')
+  assert.ok(result.checked > 0, 'and the run must not report itself as having checked nothing')
+})
+
+// A contract carried only by hops in a repo that failed to sync is dropped from scope; saying
+// nothing about it is the map-wide vanishing the suppression reporting exists to prevent.
+test('contracts stranded by an unreachable repo are reported', () => {
+  const map = {
+    repos: { gone: { url: '/nonexistent/repo', branch: 'main' } },
+    contracts: { c: { kind: 'event', schema: 'src/x.ts', fields: ['f'] } },
+    verified: {},
+    journeys: { flow: { hops: [{ repo: 'gone', reads: 'a.ts::b', outbound: 'c' }] } },
+  }
+  const mapPath = join(root, 'flowmap-stranded.json')
+  writeFileSync(mapPath, JSON.stringify(map))
+
+  const result = verify(root, map, mapPath)
+  assert.deepEqual(result.contractsStranded, ['c'])
+})
