@@ -177,3 +177,20 @@ test('a malformed draft reports rather than crashing', () => {
   assert.notEqual(r.code, 1, 'a map defect is not an internal error')
   assert.doesNotMatch(r.err, /is not a function/, 'and never a raw TypeError')
 })
+
+// `show journey` on an accepted feature must work against a cold cache. Passing mode 'sparse'
+// with no paths clones with --sparse and never sets a cone, so the checkout holds only the
+// repo root and every anchor resolves as missing — with no warning, because a fresh clone
+// reports narrowed: false.
+test('show journey resolves anchors on a cold cache', () => {
+  const cold = join(root, 'cold.json')
+  writeFileSync(cold, JSON.stringify({
+    repos: { svc: { url: repo, branch: 'main' } },
+    contracts: {},
+    journeys: { checkout: { hops: [{ repo: 'svc', reads: 'src/handler.ts::handleThing' }] } },
+    verified: {},
+  }))
+  const r = flowmap('show', 'journey', 'checkout', { mapPath: cold, cache: join(root, '.cache-cold') })
+  assert.doesNotMatch(r.out, /file not found/, 'the anchor exists and the tree must contain it')
+  assert.match(r.out, /handleThing/)
+})

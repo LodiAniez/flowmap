@@ -81,7 +81,7 @@ function ensureSynced(root, map, ids, flags, mode = 'full', { widen = false } = 
   if (missing.length) {
     process.stderr.write(dim(`syncing ${missing.length} repo(s): ${missing.join(', ')}\n`))
   }
-  return syncMany(root, map, ids, { mode, widen, offline, refresh: flags.refresh === true })
+  return syncMany(root, map, ids, { mode, widen, offline, refresh: !offline && flags.refresh === true })
 }
 
 // Anchors can only be resolved against real checkouts, so any command that resolves them
@@ -95,7 +95,11 @@ function syncForJourney(root, map, journey, flags, { widen = true } = {}) {
   // Widen: verify's cone is built from the journeys already in the map, so it cannot contain
   // a draft's anchors. Resolving them against a checkout verify narrowed reports files that
   // exist as missing, and finalize then refuses the draft with nothing explaining why.
-  const synced = ensureSynced(root, map, ids, flags, widen ? 'full' : 'sparse', { widen })
+  // Always 'full': a fresh clone needs the whole tree, because nothing here knows a cone.
+  // `widen` alone decides whether an existing sparse checkout is opened up — passing 'sparse'
+  // without paths clones with --sparse and never sets a cone, so the checkout holds only the
+  // repo root and every anchor resolves as missing.
+  const synced = ensureSynced(root, map, ids, flags, 'full', { widen })
   for (const r of synced.filter((x) => x.narrowed)) {
     process.stderr.write(
       yellow(`warning: ${r.id} is a partial checkout — anchors there may report as missing\n`) + narrowedHint(r)
@@ -479,6 +483,11 @@ function verifyCmd(args, flags) {
   })
 
   if (!result.checked) {
+    // Report what went wrong first: a repo that failed to clone is a hard failure, and
+    // returning early with "nothing to verify" would present it as an empty-but-fine map.
+    for (const r of result.repos.filter((x) => x.error)) {
+      process.stderr.write(`  ${red('!')} ${bold(r.id)}  ${yellow(r.error)}\n`)
+    }
     // Never a non-zero exit: --local is documented as the PR-time scope, and a repo that is
     // registered but not yet in a journey is an ordinary state, not a usage error. See
     // DESIGN.md "Advisory only. Never a gate."

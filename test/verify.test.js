@@ -498,3 +498,42 @@ test('contracts stranded by an unreachable repo are reported', () => {
   const result = verify(root, map, mapPath)
   assert.deepEqual(result.contractsStranded, ['c'])
 })
+
+// A repo registered for an in-progress draft is in use, even though no accepted journey names
+// it — advising its removal would break the draft being worked on.
+test('a repo used only by a pending draft is not called unused', async () => {
+  const { unusedRepos } = await import('../lib/verify.js')
+  const map = {
+    repos: { svc: {}, drafted: {} },
+    contracts: {},
+    journeys: { flow: { hops: [{ repo: 'svc', reads: 'a.ts::b' }] } },
+  }
+  assert.deepEqual(unusedRepos(map), ['drafted'], 'without the draft it looks unused')
+  assert.deepEqual(
+    unusedRepos(map, { drafts: [{ hops: [{ repo: 'drafted', reads: 'x.ts::y' }] }] }),
+    [],
+    'and with it, it is in use'
+  )
+})
+
+// And the wiring: verify must actually read drafts/ off disk, not just accept a list.
+test('verify reads pending drafts when deciding what is unused', () => {
+  const draftsDir = join(root, 'drafts')
+  mkdirSync(draftsDir, { recursive: true })
+  writeFileSync(join(draftsDir, 'pending.json'),
+    JSON.stringify({ name: 'pending', hops: [{ repo: 'drafted', reads: 'x.ts::y' }] }))
+  // A malformed sibling must not break the scan.
+  writeFileSync(join(draftsDir, 'garbage.json'), '{ not json')
+
+  const map = {
+    repos: { svc: { url: upstream, branch: 'main' }, drafted: { url: upstream, branch: 'main' } },
+    contracts: {},
+    verified: {},
+    journeys: { flow: { hops: [{ repo: 'svc', reads: 'src/handler.ts::handleThing' }] } },
+  }
+  const mapPath = join(root, 'flowmap-drafts.json')
+  writeFileSync(mapPath, JSON.stringify(map))
+
+  const result = verify(root, map, mapPath)
+  assert.deepEqual(result.unusedRepos, [], 'the drafted repo is in use by a pending draft')
+})
