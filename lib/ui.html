@@ -1,0 +1,307 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>flowmap</title>
+<style>
+  /* No CDN, no web fonts, no build step — see DESIGN.md "UI principles". */
+  :root {
+    --bg: #fbfbfa; --panel: #fff; --ink: #1c1b1a; --mute: #6b6866;
+    --line: #e4e1dd; --accent: #2f6f4f; --warn: #9a6a00; --bad: #a13d2d;
+    --rail: #c9c4be; --chip: #f1efec;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #141413; --panel: #1c1b1a; --ink: #ecebe9; --mute: #9a9691;
+      --line: #2e2c2a; --accent: #7fbf9a; --warn: #d9a441; --bad: #e08472;
+      --rail: #3a3735; --chip: #232120;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font: 14px/1.5 ui-sans-serif, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  code, pre, .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  header {
+    display: flex; align-items: baseline; gap: 16px; flex-wrap: wrap;
+    padding: 14px 20px; border-bottom: 1px solid var(--line); background: var(--panel);
+    position: sticky; top: 0; z-index: 5;
+  }
+  header h1 { font-size: 15px; margin: 0; letter-spacing: .02em; }
+  header .sub { color: var(--mute); font-size: 12px; }
+  select, button, textarea, input {
+    font: inherit; color: inherit; background: var(--panel);
+    border: 1px solid var(--line); border-radius: 6px; padding: 6px 10px;
+  }
+  button { cursor: pointer; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  button:disabled { opacity: .5; cursor: default; }
+
+  .wrap { display: grid; grid-template-columns: minmax(0,1fr) 380px; gap: 0; align-items: start; }
+  @media (max-width: 900px) { .wrap { grid-template-columns: 1fr; } }
+
+  main { padding: 20px; min-width: 0; }
+  aside {
+    padding: 20px; border-left: 1px solid var(--line); background: var(--panel);
+    position: sticky; top: 57px; max-height: calc(100vh - 57px); overflow: auto;
+  }
+  @media (max-width: 900px) { aside { position: static; border-left: 0; border-top: 1px solid var(--line); max-height: none; } }
+
+  h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .08em; color: var(--mute); margin: 0 0 10px; }
+
+  /* The rail: stops are repos, segments are contracts. The mental model is a route. */
+  .hop { display: grid; grid-template-columns: 28px minmax(0,1fr); gap: 12px; }
+  .rail { position: relative; }
+  .rail::before {
+    content: ""; position: absolute; left: 13px; top: 22px; bottom: -10px; width: 2px; background: var(--rail);
+  }
+  .hop:last-child .rail::before { display: none; }
+  .dot {
+    width: 28px; height: 28px; border-radius: 50%; border: 2px solid var(--rail);
+    background: var(--panel); display: grid; place-items: center;
+    font-size: 12px; font-weight: 600; color: var(--mute); position: relative; z-index: 1;
+  }
+  .hop.lit .dot { border-color: var(--accent); color: var(--accent); }
+  .hop.lit .card { border-color: var(--accent); }
+  .card {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+    padding: 12px 14px; margin-bottom: 14px; min-width: 0;
+  }
+  .repo { font-weight: 600; }
+  .note { color: var(--mute); font-size: 13px; margin-top: 2px; }
+  .anchor { font-size: 12px; margin-top: 6px; word-break: break-all; }
+  .anchor .side { color: var(--mute); display: inline-block; min-width: 44px; }
+  .ok { color: var(--accent); } .bad { color: var(--bad); } .warn { color: var(--warn); }
+
+  .contract {
+    margin: 2px 0 14px 40px; padding: 8px 12px; border-left: 2px solid var(--rail);
+    font-size: 12px; color: var(--mute);
+  }
+  .contract .id { color: var(--ink); font-weight: 600; }
+  .fields { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+  .chip {
+    background: var(--chip); border-radius: 5px; padding: 2px 7px; font-size: 11.5px;
+    font-family: ui-monospace, monospace;
+  }
+  .chip.added { color: var(--accent); } .chip.dropped { text-decoration: line-through; opacity: .6; }
+  .chip.missing { color: var(--bad); border: 1px dashed var(--bad); }
+  .chip.undeclared { color: var(--warn); border: 1px dashed var(--warn); }
+
+  textarea { width: 100%; min-height: 150px; resize: vertical; }
+  .row { display: flex; gap: 8px; align-items: center; margin-bottom: 10px; flex-wrap: wrap; }
+  .hint { color: var(--mute); font-size: 12px; margin: 8px 0; }
+  .payload { font-size: 12px; margin-top: 8px; }
+  .payload div { padding: 1px 0; }
+  .k { color: var(--mute); }
+  details { margin-top: 14px; } summary { cursor: pointer; color: var(--mute); font-size: 12px; }
+  pre { overflow-x: auto; background: var(--chip); padding: 10px; border-radius: 8px; font-size: 12px; }
+  .empty { color: var(--mute); padding: 40px 0; text-align: center; }
+</style>
+</head>
+<body>
+<header>
+  <h1>flowmap</h1>
+  <select id="journey"></select>
+  <span class="sub" id="meta"></span>
+</header>
+
+<div class="wrap">
+  <main>
+    <div id="rail"><div class="empty">loading…</div></div>
+    <details id="mmd">
+      <summary>mermaid source</summary>
+      <pre id="mermaid"></pre>
+    </details>
+  </main>
+
+  <aside>
+    <h2>Simulate a payload</h2>
+    <p class="hint">
+      <span id="sampleNote"></span>flowmap replays this through the transforms each hop
+      declares — read out of the code when the journey was drafted. Nothing is sent anywhere.
+    </p>
+    <textarea id="payload" spellcheck="false"></textarea>
+    <div class="row" style="margin-top:10px">
+      <button class="primary" id="run">Run</button>
+      <button id="reset">Reset</button>
+      <span class="sub" id="simstate"></span>
+    </div>
+    <div id="legend" class="hint" style="display:none">
+      <span class="chip added">added</span>
+      <span class="chip dropped">dropped</span>
+      <span class="chip missing">missing</span>
+      <span class="chip undeclared">undeclared</span>
+    </div>
+  </aside>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id)
+let MAP = null, CURRENT = null, SIM = null
+
+async function boot() {
+  MAP = await (await fetch('/api/map')).json()
+  const names = Object.keys(MAP.journeys)
+  if (!names.length) { $('rail').innerHTML = '<div class="empty">no journeys yet</div>'; return }
+  $('journey').innerHTML = names.map(n => `<option>${esc(n)}</option>`).join('')
+  $('journey').onchange = () => select($('journey').value)
+  select(names[0])
+}
+
+function select(name) {
+  CURRENT = name; SIM = null
+  const j = MAP.journeys[name]
+  $('meta').textContent = (j.description ? j.description + ' · ' : '') + j.hops.length + ' hops'
+  $('mermaid').textContent = j.mermaid
+  $('payload').value = JSON.stringify(seedPayload(j), null, 2)
+  $('sampleNote').innerHTML = j.sample && Object.keys(j.sample).length
+    ? 'This is the payload the journey records at its entry point, taken from a fixture in the source. '
+    : 'No entry payload was recorded for this journey, so this is derived from the contracts. '
+  $('simstate').textContent = ''
+  $('legend').style.display = 'none'
+  render()
+}
+
+// Prefer the payload the journey actually records at its entry point: it was copied from a
+// real fixture in the source, so pressing Run traces real values rather than invented ones.
+// The derivation below is only a fallback for journeys that never recorded one.
+function seedPayload(j) {
+  if (j.sample && Object.keys(j.sample).length) return j.sample
+
+  const first = j.hops[0] || {}
+  const wanted = new Set()
+  for (const op of first.transform || []) {
+    if (op.op === 'rename') wanted.add(op.from)
+    if (op.op === 'drop' || op.op === 'pass') wanted.add(op.field)
+  }
+  if (!wanted.size && first.inbound) {
+    for (const f of (MAP.contracts[first.inbound] || {}).fields || []) wanted.add(nameOf(f))
+  }
+  // An entry hop whose transforms only *add* fields (a form, a request body) consumes
+  // nothing, so fall back to what it emits — otherwise the box comes up empty.
+  if (!wanted.size && first.outbound) {
+    for (const f of (MAP.contracts[first.outbound] || {}).fields || []) wanted.add(nameOf(f))
+  }
+  const out = {}
+  for (const k of wanted) out[k] = sampleFor(k)
+  return Object.keys(out).length ? out : { example: 'value' }
+}
+
+function sampleFor(key) {
+  const k = key.toLowerCase()
+  if (/(total|amount|price|qty|count|quantity)/.test(k)) return 42
+  if (/(is|has|enabled)/.test(k)) return true
+  if (/(email)/.test(k)) return 'user@example.com'
+  return k.replace(/[^a-z]/g, '_').slice(0, 12) + '_1'
+}
+
+function render() {
+  const j = MAP.journeys[CURRENT]
+  const steps = SIM ? SIM.steps : null
+  $('rail').innerHTML = j.hops.map((hop, i) => {
+    const step = steps ? steps[i] : null
+    const lit = step ? ' lit' : ''
+    // A restarted hop is a separate entry point, not a continuation — say so on the rail,
+    // or the reader assumes the payload above flowed into it.
+    const restart = step && step.restarted
+      ? `<div class="contract" style="margin-left:0">${esc(step.restarted)} arrives here independently &mdash; not carried from the hop above</div>`
+      : ''
+    const anchors = ['reads', 'writes'].filter(s => hop[s]).map(s => {
+      const st = j.anchors[i + '.' + s]
+      const cls = st === 'ok' ? 'ok' : 'bad'
+      const mark = st === 'ok' ? '&#10003;' : '&#10007;'
+      const label = st === 'ok' ? '' : ' <span class="bad">(' + esc(st || 'unknown') + ')</span>'
+      return `<div class="anchor"><span class="${cls}">${mark}</span> <span class="side">${s}</span> <span class="mono">${esc(hop[s])}</span>${label}</div>`
+    }).join('')
+
+    return `
+      <div class="hop${lit}">
+        <div class="rail"><div class="dot">${i + 1}</div></div>
+        <div>
+          ${restart}
+          <div class="card">
+            <div class="repo">${esc(hop.repo)}</div>
+            ${hop.note ? `<div class="note">${esc(hop.note)}</div>` : ''}
+            ${anchors}
+            ${step ? payloadView(step) : ''}
+          </div>
+          ${hop.outbound ? contractView(hop.outbound, step) : (i < j.hops.length - 1
+            ? '<div class="contract">branch consumer &mdash; chain continues from an earlier hop</div>' : '')}
+        </div>
+      </div>`
+  }).join('')
+}
+
+function contractView(id, step) {
+  const c = MAP.contracts[id] || {}
+  const fields = (c.fields || []).map(f => {
+    const n = nameOf(f), t = typeOf(f)
+    const missing = step && step.missing.includes(n) ? ' missing' : ''
+    return `<span class="chip${missing}">${esc(n)}${t ? '<span class="k">: ' + esc(t) + '</span>' : ''}</span>`
+  }).join('')
+  const extra = step ? step.extra.map(n => `<span class="chip undeclared">${esc(n)}<span class="k"> not in contract</span></span>`).join('') : ''
+  return `<div class="contract">
+    <span class="id">${esc(id)}</span> ${c.kind ? '<span class="k">' + esc(c.kind) + '</span>' : ''}
+    <div class="fields">${fields}${extra}</div>
+  </div>`
+}
+
+function payloadView(step) {
+  const rows = Object.entries(step.out).map(([k, v]) =>
+    `<div><span class="mono">${esc(k)}</span> <span class="k">=</span> <span class="mono">${esc(JSON.stringify(v))}</span></div>`).join('')
+  const events = step.events.map(e => {
+    if (e.kind === 'rename') return `<span class="chip">${esc(e.from)} &rarr; ${esc(e.to)}</span>`
+    if (e.kind === 'add' || e.kind === 'derive') {
+      // Distinguish "this hop created it" from "it already arrived and this hop names it".
+      const cls = e.carried ? 'chip' : 'chip added'
+      const label = e.carried ? esc(e.field) + '<span class="k"> (already present)</span>' : '+ ' + esc(e.field)
+      return `<span class="${cls}">${label}${e.source && !e.carried ? '<span class="k"> from ' + esc(e.source) + '</span>' : ''}</span>`
+    }
+    if (e.kind === 'drop') return `<span class="chip dropped">${esc(e.field)}</span>`
+    if (e.kind === 'rename-missing') return `<span class="chip missing">${esc(e.from)} never arrived</span>`
+    if (e.kind === 'pass-missing') return `<span class="chip missing">${esc(e.field)} never arrived</span>`
+    return `<span class="chip warn">${esc(e.detail || e.kind)}</span>`
+  }).join('')
+
+  // An untraced hop is the map admitting it does not describe this step yet — say so rather
+  // than rendering an unchanged payload as though it were a finding.
+  const untraced = step.untraced
+    ? '<div class="hint">no transforms recorded for this hop &mdash; payload passed through unchanged</div>' : ''
+  const undeclared = step.undeclared.length
+    ? `<div class="fields" style="margin-top:6px">${step.undeclared.map(n => `<span class="chip undeclared">${esc(n)}<span class="k"> undeclared</span></span>`).join('')}</div>` : ''
+
+  return `<div class="payload">
+    ${events ? `<div class="fields" style="margin:8px 0">${events}</div>` : ''}
+    ${untraced}${undeclared}
+    <div style="margin-top:6px">${rows || '<span class="k">empty</span>'}</div>
+  </div>`
+}
+
+$('run').onclick = async () => {
+  let payload
+  try { payload = JSON.parse($('payload').value || '{}') }
+  catch (e) { $('simstate').innerHTML = '<span class="bad">invalid JSON</span>'; return }
+  const res = await fetch('/api/simulate', {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ journey: CURRENT, payload })
+  })
+  SIM = await res.json()
+  $('simstate').textContent = ''
+  $('legend').style.display = 'block'
+  render()
+}
+
+$('reset').onclick = () => { SIM = null; $('legend').style.display = 'none'; select(CURRENT) }
+
+const nameOf = (f) => typeof f === 'string' ? f : (f && f.name) || String(f)
+const typeOf = (f) => (f && typeof f === 'object' && f.type) || ''
+function esc(s) {
+  return String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]))
+}
+
+boot()
+</script>
+</body>
+</html>

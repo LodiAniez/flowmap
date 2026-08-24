@@ -1,0 +1,427 @@
+# flowmap
+
+An ordered, anchored description of how data flows across repos — for the agent about to
+make a cross-repo change, and the human reviewing it.
+
+The unit is a **contract** (an endpoint, an event topic, a table) with a **file anchor on
+both sides**, which is what turns "these two services are related" into "open this line."
+
+**flowmap is advisory.** It never fails a build, blocks a merge, or votes on a PR. Findings
+always exit 0. It is a context reference, not a gate — see
+[DESIGN.md](./DESIGN.md#decisions-and-rationale) for why that constraint shapes everything
+else.
+
+## The three commands
+
+```
+cd ~/repos/orders-api
+flowmap draft journey checkout      # no setup — discovers the repos itself
+flowmap show journey checkout       # diagram it, with payload fields and types
+flowmap finalize journey checkout   # accept the reviewed draft into flowmap.json
+flowmap visualize                   # interactive UI, with payload simulation
+```
+
+There is no setup step. Run `draft journey` inside the repo where the feature starts and
+flowmap treats that repo as the journey's origin, greps every sibling repo in the same parent
+directory, and registers only the ones that actually mention the feature.
+
+The wide pass is cheap because those repos are already on disk: `git grep <term> <branch>`
+searches a default branch **without checking it out**, so scanning fifty neighbours takes a
+couple of seconds and clones nothing. Only the repos that matched get cloned.
+
+```
+$ flowmap draft journey supported-features --seed supportedFeatures
+scanning repos beside loyalty-connector for supportedFeatures…
+discovered 3 of 54 repos: loyalty-connector (start), manage-frontend 12, manage 3
+  not on their default branch, only on the branch checked out locally:
+    loyalty-contract  1 hit(s) on feature/loy2-1119-…
+drafted supported-features -> drafts/supported-features.json
+
+  3 repo(s), 15 candidate file(s), 63 anchor(s) ready to use
+```
+
+That second warning matters: flowmap maps **merged** code. A repo whose match lives only on
+an unmerged branch is not in the map, and saying so beats reporting a confident zero.
+
+`flowmap init`, `flowmap repo add`, `search` and `sync` still exist for when you want to
+pin a scope by hand, but you rarely need them.
+
+## Status
+
+| Command | State |
+| --- | --- |
+| `init`, `repo` | built |
+| `draft journey` / `--check` | built |
+| `show journey` | built |
+| `finalize journey` | built |
+| `visualize` | built |
+| `search`, `sync` | built |
+| `journey`, `impact` | built |
+| `verify` | not built — build order step 3 |
+
+## Install
+
+Zero dependencies, Node 18+. There is no build step.
+
+```
+git clone <this-repo> && cd flowmap && npm link
+```
+
+`npm link` puts `flowmap` on your `PATH`. Remove it later with `npm unlink -g flowmap`.
+
+## Quick start
+
+```
+cd ~/code/orders-api
+flowmap init                                    # creates flowmap.json AND registers this repo
+flowmap repo add billing git@github.com:org/billing.git
+
+flowmap draft journey checkout                  # your agent reads the brief and drafts
+flowmap show journey checkout                   # you review the rail + diagram
+flowmap finalize journey checkout               # you accept
+flowmap visualize                               # explore it, simulate a payload
+```
+
+`flowmap.json` is found by searching upward from wherever you are, like `.git`.
+
+### Default branches
+
+Repos disagree about this — `main`, `master`, `develop`, `trunk` all occur, often in one
+org. flowmap detects it per repo from the **remote**, records it, and never guesses. So
+registering a repo while you sit on a feature branch still records the real default. If a
+repo later renames its default, `sync` fails with the exact fix rather than a git trace.
+
+Local paths are accepted as sources, but flowmap records that repo's **origin URL**, because
+`flowmap.json` is committed and an absolute path resolves on one machine only. `--keep-path`
+overrides.
+
+## flowmap.json
+
+One committed file. The CLI and the UI read the same one, so they cannot disagree.
+
+```json
+{
+  "repos": {
+    "orders-api": {
+      "url": "git@github.com:org/orders-api.git",
+      "branch": "main",
+      "produces": [
+        { "contract": "event.order.created", "anchor": "src/events/publish.ts::publishOrderCreated" }
+      ]
+    }
+  },
+  "contracts": {
+    "event.order.created": {
+      "kind": "event",
+      "schema": "src/events/schemas/order-created.json",
+      "fields": ["order.id", "order.total"]
+    }
+  },
+  "journeys": {
+    "checkout": {
+      "description": "cart submit through to stock reservation",
+      "hops": [
+        {
+          "repo": "orders-api",
+          "inbound": null,
+          "outbound": "event.order.created",
+          "reads": "src/routes/checkout.ts::createOrder",
+          "writes": "src/events/publish.ts::publishOrderCreated",
+          "note": "persists the order, emits created"
+        }
+      ]
+    }
+  },
+  "verified": {}
+}
+```
+
+Anchors are `path/to/file.ts::symbolName`, repo-relative. Full shape in
+[schema.json](./schema.json).
+
+`verified` is written by `flowmap verify` and never by hand. Journeys are the opposite:
+drafted by an agent, authored by a human.
+
+## Commands
+
+### `flowmap init`
+
+Create a `flowmap.json` in the current directory and register the repo you are standing in.
+Refuses to overwrite an existing map without `--force`; skip self-registration with
+`--no-self`.
+
+```
+$ flowmap init
+created /Users/you/code/deckster/flowmap.json
+added   deckster -> https://github.com/you/deckster.git (master)
+```
+
+### `flowmap repo add [<id> <url-or-path>]`
+
+Register a repo. With no arguments it detects the git repo you are standing in, including
+its origin URL and default branch.
+
+```
+$ flowmap repo add orders-api ~/code/orders-api
+added orders-api -> /Users/you/code/orders-api (master)
+```
+
+Also `flowmap repo list` and `flowmap repo remove <id>`. Pass `--branch <name>` to override
+detection, and `--force` to update a repo that is already registered — which is how you fix
+a renamed default branch.
+
+### `flowmap search <string>`
+
+Grep a contract identifier across the repos in scope.
+
+```
+$ flowmap search order.created --repos orders-api,fulfilment
+
+orders-api — 1 hit
+  src/events/publish.ts:1  const TOPIC = 'order.created'
+
+fulfilment — 1 hit
+  src/handlers/order.ts:1  // subscribes to order.created
+```
+
+Async consumers have no call site to grep for — but they do reference the topic name.
+Searching the *contract* rather than the caller is what makes fan-out findable. Repos are
+synced on first use, so this is a local grep.
+
+### `flowmap draft journey <feature>`
+
+Writes `drafts/<feature>.json`, already filled in with everything a machine can settle.
+
+```
+$ flowmap draft journey checkout --seed order.created
+drafted checkout -> drafts/checkout.json
+
+  2 repo(s), 2 candidate file(s), 2 anchor(s) ready to use
+
+  orders-api
+    src/events/publish.ts  1 symbol(s)
+  fulfilment
+    src/handlers/order.ts  1 symbol(s)
+
+  then  flowmap draft --check checkout
+```
+
+The file arrives with `hops: []` and four scaffolding keys for the agent:
+
+| key | what it carries |
+| --- | --- |
+| `_searched` | each repo's checkout path, branch and sha — read these directly |
+| `_candidates` | matching files per repo, each with **ready-made anchors** from real source |
+| `_hopTemplate`, `_contractTemplate` | the exact shape to copy |
+| `_instructions` | the rules, restated where the agent is working |
+
+Offered anchors are extracted from the checked-out source, so they resolve by construction —
+an agent picking from the list cannot invent a path. `_` keys are stripped by `finalize` and
+never reach `flowmap.json`.
+
+`--seed` is the strongest input: a topic, table or endpoint name beats the feature name,
+because a silent consumer never names its producer — only the identifier. `--force`
+overwrites an existing draft; `--brief` prints the long-form brief instead.
+
+### `flowmap journey <feature>`
+
+The ordered hops. This is the cheap read path — it touches `flowmap.json` and nothing else:
+no sync, no network, no checkouts.
+
+```
+$ flowmap journey velocity --format=agent
+1	serve-frontend	-	gql.linkVelocityMembership	…::VelocityLinkingForm	…::VelocityAccountLink	unverified
+2	serve-api	gql.linkVelocityMembership	http.velocity.membership.link	…::LoyaltyVelocityResolver	…::LoyaltyVelocityService	unverified
+```
+
+Bare `flowmap journey` lists the journeys in the map.
+
+### `flowmap impact <field>`
+
+Every hop that carries a field, on both sides — a field arriving and a field leaving are
+different edit sites.
+
+```
+$ flowmap impact membershipId
+membershipId — 5 hop(s) across 1 journey(s)
+
+  gql.linkVelocityMembership membershipId: string
+  http.velocity.membership.link membershipId: string
+  …
+```
+
+Matching is substring over field paths. Fine at current scale; see Known gaps in DESIGN.md.
+
+### `flowmap show journey <feature>`
+
+Prints the rail with every anchor resolved live, and writes `diagrams/<feature>.md` — a
+Mermaid diagram plus a per-step table of fields, types and transforms. It renders inline on
+GitHub, so it can go straight into a PR. `--mermaid` prints only the graph.
+
+```
+$ flowmap show journey checkout
+checkout
+   1  orders-api
+      ✓ reads  src/routes/checkout.ts::createOrder:3
+      ✓ writes src/events/publish.ts::publishOrderCreated:3
+        · adds order.id (string) from persist()
+        · renames total to order.total
+        · drops cart_id
+        │
+        └─ event.order.created  (order.id: string, order.total: number)
+        ▼
+   2  fulfilment
+      ✓ reads  src/handlers/order.ts::onOrderCreated:2
+```
+
+### `flowmap finalize journey <feature>`
+
+Accept a reviewed draft. Looks in `drafts/` by name, so you only pass the journey name. It
+merges the journey, folds in any `newContracts`, strips draft-only bookkeeping, and deletes
+the draft.
+
+```
+$ flowmap finalize journey checkout
+finalized checkout — 2 hops -> /Users/you/code/ctx/flowmap.json
+  added contracts: event.order.created
+  1 hop(s) were marked unsure by the drafter — worth a second look
+```
+
+Refuses if an anchor does not resolve — data integrity, not gating; no build or merge is
+affected. `--force` overrides, `--keep-draft` keeps the file.
+
+### `flowmap visualize`
+
+Serves an interactive UI on localhost. No CDN, no web fonts, no build step; the page is one
+file read from disk, and `flowmap.json` is re-read per request so edits show up on refresh.
+
+The panel simulates a payload. You type what arrives at the first hop and flowmap replays it
+through the `transform` ops each hop declares — ops that were read out of the code at draft
+time and anchored to the file that performs them. **Nothing is sent anywhere**; no service
+needs to be running.
+
+What it surfaces:
+
+- fields **added**, **renamed** or **dropped** at each hop, and where an added value comes from
+- fields the outbound contract promises that **never arrived** — where a consumer breaks
+- fields flowing through that **no contract declares** — the map admitting a gap
+- hops with no recorded transforms, marked **untraced** rather than drawn as unchanged
+
+That last pair matters: a simulation that quietly passed unknown fields through would look
+complete while describing nothing.
+
+### `flowmap sync`
+
+Refresh the local checkouts. Shallow, and scoped to the repos you name.
+
+## Repo scope
+
+Commands default to every registered repo — the registry only contains repos you chose to
+add, so for a normal context repo that is a handful. Above **12** registered repos flowmap
+stops defaulting and asks for `--repos a,b,c` or an explicit `--all`, because a sweep that
+wide is the crawl this tool exists to avoid.
+
+## Working with an AI
+
+The intended loop is two commands from you and the rest from your agent:
+
+```
+flowmap draft journey checkout      # agent runs this — writes drafts/checkout.json
+                                    # agent reads the repos and fills in "hops"
+                                    # agent self-checks: flowmap draft --check checkout
+flowmap show journey checkout       # you review the rail and the diagram
+flowmap finalize journey checkout   # you accept — the agent must never run this
+```
+
+The brief tells the agent to stop at `show journey` and leave accepting to you. That single review
+gate is the whole reason a generated journey is trustworthy: anchors are machine-checked, so
+your attention goes to scope and altitude, which no machine can judge.
+
+A ready-made skill for this lives in `skills/flowmap-draft-journey/SKILL.md` — copy it to
+`~/.claude/skills/` to get `/flowmap-draft-journey <feature>` in every repo.
+
+## The agent block
+
+Paste into your `CLAUDE.md` or agent file. Keep it short — long always-loaded instructions
+defeat the point of the tool. (Or use the skill in `skills/flowmap-draft-journey/`.)
+
+```markdown
+### flowmap — cross-repo data flow
+
+Before editing anything that crosses a service boundary, ask flowmap instead of grepping:
+
+  flowmap journey <feature> --format=agent   # ordered hops for a named flow
+  flowmap impact <field> --format=agent      # every hop carrying a field
+
+Tab-separated, no header. journey: hop, repo, inbound, outbound, reads, writes, status.
+impact: journey, hop, repo, side, contract, field, reads, writes, status.
+
+Open the anchored files it names; do not sweep the repos to rediscover them.
+A `status` of stale or unverified means that hop has not been checked against source —
+read the file before trusting it.
+
+For anything the map does not cover, search the contract identifier — the topic, table or
+endpoint name — not the caller. Async consumers have no call site, which is the whole
+reason this tool exists:
+
+  flowmap search <contract-id> --format=agent
+
+flowmap is a map, not an authority. It never blocks anything. A hop it does not list may
+still exist, and anything reported as stale or unresolved has not been checked against
+source — read the file before trusting it.
+```
+
+## Agent output format
+
+`--format=agent` (or `--agent`) emits tab-separated, uncolored, deterministic lines with no
+header. Cells never contain tabs or newlines.
+
+| Command | Columns |
+| --- | --- |
+| `journey` | `hop`, `repo`, `inbound`, `outbound`, `reads`, `writes`, `status` |
+| `impact` | `journey`, `hop`, `repo`, `side`, `contract`, `field`, `reads`, `writes`, `status` |
+| `search` | `repo`, `path`, `line`, `text` |
+| `draft --check` | `hop`, `repo`, `side`, `anchor`, `status`, `line` |
+
+A missing value renders as `-`, never as an empty cell, so columns never shift.
+
+`status` on `journey` and `impact` is `ok`, `stale` (verified over 90 days ago) or
+`unverified` (never checked). It is `unverified` for everything until `flowmap verify`
+exists — which is honest: an agent must be able to tell a checked hop from an unchecked one
+before deciding whether to trust it.
+
+`status` is one of `ok`, `symbol-missing`, `file-missing`, `repo-missing`, `malformed`,
+`absent`.
+
+This is a stable interface. **Changing column order is a breaking change.**
+
+## Exit codes
+
+| Code | Meaning |
+| --- | --- |
+| 0 | ran successfully — *including when it reported findings* |
+| 1 | the tool failed to run (git error, unreadable file) |
+| 2 | usage error (bad arguments, unknown repo id, unbuilt command) |
+
+Findings are never non-zero. There is deliberately no `--strict` mode; if you want a build
+to fail on a contract change, that is a contract test in the producing repo.
+
+## Environment
+
+| Variable | Effect |
+| --- | --- |
+| `FLOWMAP_FILE` | path to `flowmap.json` (default: nearest one, searching upward) |
+| `FLOWMAP_CACHE` | checkout cache (default: `.flowmap-cache/` beside `flowmap.json`) |
+| `NO_COLOR` | disable colored output |
+
+## Tests
+
+```
+npm test
+```
+
+## Why it is shaped this way
+
+[DESIGN.md](./DESIGN.md) covers the rationale and the rejected alternatives — why it pulls
+instead of receiving pushed cards, why anchors come in pairs, why stale entries stay
+visible, and why nothing here is ever allowed to block.

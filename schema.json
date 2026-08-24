@@ -1,0 +1,259 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "flowmap",
+  "type": "object",
+  "required": [
+    "repos",
+    "contracts",
+    "journeys"
+  ],
+  "properties": {
+    "repos": {
+      "description": "id -> clone target plus what the repo produces and consumes",
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "required": [
+          "url"
+        ],
+        "properties": {
+          "url": {
+            "type": "string"
+          },
+          "branch": {
+            "type": "string"
+          },
+          "produces": {
+            "$ref": "#/$defs/edgeList"
+          },
+          "consumes": {
+            "$ref": "#/$defs/edgeList"
+          }
+        }
+      }
+    },
+    "contracts": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "required": [
+          "kind"
+        ],
+        "properties": {
+          "kind": {
+            "enum": [
+              "http",
+              "grpc",
+              "event",
+              "queue",
+              "table",
+              "file"
+            ]
+          },
+          "schema": {
+            "type": "string",
+            "description": "path to the authoritative schema"
+          },
+          "fields": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/field"
+            }
+          }
+        }
+      }
+    },
+    "journeys": {
+      "description": "Hand-authored. Drafted by an agent, never generated into place.",
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "required": [
+          "hops"
+        ],
+        "properties": {
+          "description": {
+            "type": "string"
+          },
+          "hops": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/hop"
+            }
+          },
+          "sample": {
+            "type": "object",
+            "description": "The payload that actually arrives at the first hop, copied from a real fixture or test in the source. Used to seed the simulator in `flowmap visualize`.",
+            "additionalProperties": true
+          }
+        }
+      }
+    },
+    "verified": {
+      "description": "Written by `flowmap verify`, never by hand.",
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "branch": {
+            "type": "string"
+          },
+          "sha": {
+            "type": "string"
+          },
+          "at": {
+            "type": "string"
+          },
+          "anchors": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "anchor": {
+      "type": "string",
+      "pattern": "^[^:]+::.+$",
+      "description": "path/to/file.ts::symbolName, repo-relative"
+    },
+    "edgeList": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "contract",
+          "anchor"
+        ],
+        "properties": {
+          "contract": {
+            "type": "string"
+          },
+          "anchor": {
+            "$ref": "#/$defs/anchor"
+          },
+          "note": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "hop": {
+      "type": "object",
+      "required": [
+        "repo"
+      ],
+      "properties": {
+        "repo": {
+          "type": "string"
+        },
+        "inbound": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "contract id; null on the first hop"
+        },
+        "outbound": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "contract id; null on a branch consumer"
+        },
+        "reads": {
+          "$ref": "#/$defs/anchor"
+        },
+        "writes": {
+          "$ref": "#/$defs/anchor"
+        },
+        "note": {
+          "type": "string"
+        },
+        "confidence": {
+          "enum": [
+            "high",
+            "low"
+          ]
+        },
+        "uncertain": {
+          "type": "string"
+        },
+        "transform": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/transformOp"
+          }
+        }
+      }
+    },
+    "field": {
+      "description": "Either \"order.total\" or a typed object recorded from the code at draft time.",
+      "oneOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "object",
+          "required": [
+            "name"
+          ],
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string"
+            },
+            "note": {
+              "type": "string"
+            }
+          }
+        }
+      ]
+    },
+    "transformOp": {
+      "description": "What this hop does to the payload, read out of the code at the anchor. Replayed by `flowmap visualize`.",
+      "type": "object",
+      "required": [
+        "op"
+      ],
+      "properties": {
+        "op": {
+          "enum": [
+            "add",
+            "rename",
+            "drop",
+            "pass",
+            "derive"
+          ]
+        },
+        "field": {
+          "type": "string",
+          "description": "target of add/drop/pass/derive"
+        },
+        "from": {
+          "type": "string",
+          "description": "rename source"
+        },
+        "to": {
+          "type": "string",
+          "description": "rename target"
+        },
+        "type": {
+          "type": "string"
+        },
+        "source": {
+          "type": "string",
+          "description": "where the value comes from, e.g. persist()"
+        },
+        "value": {
+          "description": "literal sample value, if the code fixes one"
+        },
+        "note": {
+          "type": "string"
+        }
+      }
+    }
+  }
+}

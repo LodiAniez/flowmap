@@ -1,0 +1,13 @@
+{
+  "name": "flowmap",
+  "version": "0.1.0",
+  "description": "Cross-repo data-flow context reference. Advisory only — never a gate.",
+  "type": "module",
+  "bin": { "flowmap": "./bin/flowmap.js" },
+  "engines": { "node": ">=18" },
+  "files": ["bin", "lib", "schema.json"],
+  "dependencies": {},
+  "scripts": {
+    "test": "node --test test/*.test.js"
+  }
+}
