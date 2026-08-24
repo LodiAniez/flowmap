@@ -268,3 +268,34 @@ test('combinator composition from a package is inconclusive', () => {
     "import { BaseOrder } from '@acme/shared'\nexport const S = z.union([BaseOrder, z.object({ note: z.string() })])\n")
   assert.equal(check({ schema: 'src/uni.ts', fields: ['note', 'fromBase'] }).status, INCONCLUSIVE)
 })
+
+// The import spellings a real codebase actually uses. Three consecutive review rounds found
+// bugs triggered by an unusual one, so the whole space is swept here rather than waiting for
+// the next spelling to surface as a confident wrong answer.
+const SPELLINGS = {
+  'extensionless': "import { Dep } from './sub/dep'",
+  'dot-js': "import { Dep } from './sub/dep.js'",
+  'dot-ts': "import { Dep } from './sub/dep.ts'",
+  'directory index': "import { Dep } from './sub'",
+  'explicit index': "import { Dep } from './sub/index.js'",
+  'side-effect': "import './sub/dep.js'",
+  're-export named': "export { Dep } from './sub/dep.js'",
+  're-export star': "export * from './sub/dep.js'",
+  'require': "const { Dep } = require('./sub/dep')",
+  'dynamic import': "const m = await import('./sub/dep.js')",
+  'type-only': "import type { Dep } from './sub/dep.js'",
+  'multiline': "import {\n  Dep,\n} from './sub/dep.js'",
+}
+
+for (const [label, statement] of Object.entries(SPELLINGS)) {
+  test(`follows a relative import written as: ${label}`, () => {
+    mkdirSync(join(repo, 'src', 'sub'), { recursive: true })
+    writeFileSync(join(repo, 'src', 'sub', 'dep.ts'), 'export const Dep = z.object({ fromDep: z.string() })\n')
+    writeFileSync(join(repo, 'src', 'sub', 'index.ts'), "export * from './dep.js'\n")
+    const file = `src/spell-${label.replace(/\W/g, '')}.ts`
+    writeFileSync(join(repo, file), `${statement}\nexport const S = z.object({ own: z.string() })\n`)
+
+    const r = check({ schema: file, fields: ['own', 'fromDep'] })
+    assert.equal(r.status, SCHEMA_OK, `${label}: the imported field must be found`)
+  })
+}
