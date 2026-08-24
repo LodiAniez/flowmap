@@ -57,6 +57,10 @@ function help() {
 // A narrowed checkout has two causes with two different fixes; blaming the network for a
 // flag the user passed sends them looking in the wrong place.
 function narrowedHint(r) {
+  if (r.staleOrigin) {
+    return dim('  its registered url changed and --no-sync declined the re-fetch; these are the\n') +
+      dim('  previous repository\'s files. Drop the flag to pick up the new one.\n')
+  }
   return r.narrowedReason === 'declined'
     ? dim('  --no-sync declined to fetch the rest of it; drop the flag to search it all\n')
     : dim('  flowmap could not fetch the rest of it; retry when origin is reachable\n')
@@ -64,10 +68,24 @@ function narrowedHint(r) {
 
 // A checkout left narrow because this caller had no reason to widen it is not a problem to
 // report — the cone already covers what it is about to read.
-const worthWarning = (r) => r.narrowed && r.narrowedReason !== 'by-design'
+const worthWarning = (r) => (r.narrowed && r.narrowedReason !== 'by-design') || r.staleOrigin
 
 function scopeFor(map, flags, purpose) {
+  requireValues(flags, ['repos', 'seed'])
   return resolveRepoIds(map, list(flags.repos), { all: flags.all === true, purpose })
+}
+
+// A scope flag given without a value parses as `true` (bare) or `''` (with `=`), and list()
+// turns both into an empty array — so the run silently widens to everything while the caller
+// believes it is scoped. This has to guard every command, not just the one it was found on.
+function requireValues(flags, names) {
+  for (const name of names) {
+    const given = flags[name]
+    if (given === undefined) continue
+    if (given === true || list(given).length === 0) {
+      throw new UserError(`--${name} needs a value`, EXIT_USAGE)
+    }
+  }
 }
 
 function ensureSynced(root, map, ids, flags, mode = 'full', { widen = false } = {}) {
@@ -490,9 +508,13 @@ function verifyCmd(args, flags) {
   // instead of quietly narrowing the scope to nothing.
   if (repoIds.length) resolveRepoIds(map, repoIds, { all: true, purpose: 'verify' })
 
+  const here = repoRoot()
   const result = runVerify(root, map, path, {
     repoIds: repoIds.length ? repoIds : null,
     journeys: requested.length ? requested : null,
+    // The repo we are standing in, so the unused report cannot advise removing the one
+    // `--local` depends on.
+    self: here ? here.split('/').pop() : null,
   })
 
   if (!result.checked) {
@@ -607,9 +629,14 @@ function verifyCmd(args, flags) {
     )
   }
   if (result.contractIssues.length) {
-    const definite = result.contractIssues.filter((c) => c.status !== 'schema-inconclusive').length
-    const unsure = result.contractIssues.length - definite
-    const parts = [definite ? `${definite} disagree with their schema` : '', unsure ? `${unsure} could not be confirmed` : '']
+    const definite = result.contractIssues.filter((c) => c.status === 'fields-missing').length
+    const absent = result.contractIssues.filter((c) => c.status === 'schema-not-found').length
+    const unsure = result.contractIssues.length - definite - absent
+    const parts = [
+      definite ? `${definite} disagree with their schema` : '',
+      absent ? `${absent} name a schema file that is not there` : '',
+      unsure ? `${unsure} could not be confirmed` : '',
+    ]
     process.stdout.write(`\n  ${yellow(`contracts: ${parts.filter(Boolean).join(', ')}`)}\n`)
     for (const c of result.contractIssues) {
       if (c.status === 'schema-inconclusive') {

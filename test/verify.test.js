@@ -589,3 +589,16 @@ test('an orphan contract does not disable the unused-repo report', () => {
   assert.deepEqual(result.unusedRepos, ['nobody'],
     'an orphan must not permanently silence the report')
 })
+
+// `--local` resolves against the repo flowmap.json lives in; advising its removal makes the
+// documented PR-time scope fail with "needs to run inside a registered repo".
+test('the self-registered repo is never reported as unused', async () => {
+  const { unusedRepos } = await import('../lib/verify.js')
+  const map = {
+    repos: { ctx: {}, svc: {} },
+    contracts: {},
+    journeys: { flow: { hops: [{ repo: 'svc', reads: 'a.ts::b' }] } },
+  }
+  assert.deepEqual(unusedRepos(map), ['ctx'], 'without knowing, it looks unused')
+  assert.deepEqual(unusedRepos(map, { self: 'ctx' }), [], 'but --local depends on it')
+})

@@ -46,3 +46,17 @@ test('the boolean set covers the flags the CLI actually treats as boolean', () =
     assert.ok(BOOLEAN_FLAGS.has(f), `${f} must be declared boolean`)
   }
 })
+
+// Every consumer tests `flags.x === true`, so collapsing a repeated boolean into an array
+// makes the flag read as false — the flag repeated is the flag ignored, which is the worst
+// possible reading of a user typing it twice.
+test('a repeated boolean flag stays true', () => {
+  for (const flag of ['force', 'all', 'agent', 'local']) {
+    const { flags } = parseArgs(['cmd', `--${flag}`, `--${flag}`])
+    assert.equal(flags[flag], true, `--${flag} twice must still be true`)
+  }
+})
+
+test('a repeated value flag still collects', () => {
+  assert.deepEqual(list(parseArgs(['--seed', 'a', '--seed', 'b']).flags.seed), ['a', 'b'])
+})

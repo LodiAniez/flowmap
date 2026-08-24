@@ -213,3 +213,19 @@ test('the agent format reports contracts it never checked', () => {
   assert.match(r.out, /onB/, 'silence here would read as a clean result')
   assert.equal(r.code, 0)
 })
+
+// The valueless-scope guard was written for verify and covered only verify; every other
+// command widened to the whole registry while the caller believed the run was scoped.
+test('a valueless scope flag is rejected on every command that scopes', () => {
+  for (const argv of [
+    ['search', 'needle', '--repos'],
+    ['search', 'needle', '--repos='],
+    ['draft', 'journey', 'x', '--repos'],
+    ['sync', '--repos'],
+    ['verify', '--repos'],
+  ]) {
+    const r = flowmap(...argv)
+    assert.equal(r.code, 2, `flowmap ${argv.join(' ')} must not silently widen`)
+    assert.match(r.err, /needs a value/)
+  }
+})

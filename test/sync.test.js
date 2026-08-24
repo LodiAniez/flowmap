@@ -190,3 +190,17 @@ test('--no-sync leaves a changed url uncorrected rather than half-applied', () =
   assert.equal(run(['remote', 'get-url', 'origin'], online.dir).trim(), newUp)
   assert.match(readFileSync(join(online.dir, 'a.ts'), 'utf8'), /new/, 'and the tree follows')
 })
+
+// Deferring the url correction is right, but the tree is then the previous repository's and a
+// silent complete-looking result is the failure the deferral was meant to avoid.
+test('a deferred url correction is reported as a stale checkout', () => {
+  const oldUp = makeUpstream('svc-stale-old', { 'a.ts': 'export const which = "old"\n' })
+  const newUp = makeUpstream('svc-stale-new', { 'a.ts': 'export const which = "new"\n' })
+
+  syncRepo(root, 'svc-stale', { url: oldUp, branch: 'main' }, { mode: 'full' })
+  const offline = syncRepo(root, 'svc-stale', { url: newUp, branch: 'main' }, { mode: 'full', offline: true })
+  assert.equal(offline.staleOrigin, true, 'the caller must be told these are the old files')
+
+  const online = syncRepo(root, 'svc-stale', { url: newUp, branch: 'main' }, { mode: 'full' })
+  assert.equal(online.staleOrigin, false, 'and not told once it is corrected')
+})
