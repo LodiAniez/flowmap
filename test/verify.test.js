@@ -550,7 +550,8 @@ test('a contract outside the run scope is distinguished from one whose repo fail
 
   const map = {
     repos: { a: { url: upstream, branch: 'main' }, b: { url: other, branch: 'main' } },
-    contracts: { onB: { kind: 'event', schema: 'b/src/x.ts', fields: [] } },
+    // A bare path: nothing says which repo holds it, so a scoped run genuinely cannot check it.
+    contracts: { onB: { kind: 'event', schema: 'src/x.ts', fields: [] } },
     verified: {},
     journeys: {
       ja: { hops: [{ repo: 'a', reads: 'src/handler.ts::handleThing' }] },
@@ -563,6 +564,32 @@ test('a contract outside the run scope is distinguished from one whose repo fail
   const result = verify(root, map, mapPath, { repoIds: ['a'] })
   assert.deepEqual(result.contractsStranded, [], 'nothing failed to sync')
   assert.deepEqual(result.contractsOutOfScope, ['onB'], 'it was simply not in scope')
+})
+
+// A repo-qualified schema names its repo, and verify syncs that repo whatever the scope — so
+// the contract is checkable even on a scoped run. Without this, --local silently checked zero
+// contracts whose schema lives in a shared contracts package.
+test('a repo-qualified schema is checked even on a scoped run', () => {
+  const pkg = join(root, 'scope-pkg')
+  mkdirSync(join(pkg, 'src'), { recursive: true })
+  writeFileSync(join(pkg, 'src', 'order.ts'), 'export const O = z.object({ total: z.number() })\n')
+  run(['init', '-q', '-b', 'main'], pkg)
+  run(['add', '-A'], pkg)
+  run(['-c', 'user.email=t@e.com', '-c', 'user.name=t', 'commit', '-qm', 'init'], pkg)
+
+  const map = {
+    repos: { app: { url: upstream, branch: 'main' }, pkg: { url: pkg, branch: 'main' } },
+    contracts: { order: { kind: 'event', schema: 'pkg/src/order.ts', fields: ['total', 'ghost'] } },
+    verified: {},
+    journeys: { flow: { hops: [{ repo: 'app', reads: 'src/handler.ts::handleThing', outbound: 'order' }] } },
+  }
+  const mapPath = join(root, 'flowmap-qualified-scoped.json')
+  writeFileSync(mapPath, JSON.stringify(map))
+
+  const result = verify(root, map, mapPath, { repoIds: ['app'] })
+  const order = result.contracts.find((c) => c.id === 'order')
+  assert.equal(order?.status, 'fields-missing', 'the named repo was fetched and searched')
+  assert.deepEqual(result.contractsOutOfScope, [])
 })
 
 // An orphan bare-path contract is never checked by any run, so the repo holding its schema is

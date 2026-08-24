@@ -432,3 +432,18 @@ test('a package combined in by a combinator is still inconclusive', () => {
     assert.equal(check({ schema: file, fields: ['id', 'fromBase'] }).status, INCONCLUSIVE, label)
   }
 })
+
+// Nothing validates flowmap.json on load, so a hand edit can leave anything in `fields`. A
+// malformed value is a map defect to report — crashing fails a CI step the tool promises never
+// to fail.
+test('a malformed fields value is reported, not thrown', async () => {
+  const { MALFORMED_FIELDS } = await import('../lib/contracts.js')
+  for (const fields of [{ x: 1 }, 'nope', 5, null]) {
+    let status
+    assert.doesNotThrow(() => {
+      status = check({ schema: 'src/standalone.ts', fields }).status
+    }, `fields=${JSON.stringify(fields)} must not throw`)
+    assert.equal(status, MALFORMED_FIELDS)
+  }
+  assert.equal(check({ schema: 'src/standalone.ts' }).status, SCHEMA_OK, 'omitted is fine')
+})

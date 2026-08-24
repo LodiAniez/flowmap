@@ -88,6 +88,16 @@ function requireValues(flags, names) {
   }
 }
 
+// A flag repeated where only one value makes sense arrives as an array, which then fails a
+// `typeof === 'string'` test and silently falls back to a default the caller did not ask for.
+function requireSingle(flags, names) {
+  for (const name of names) {
+    if (Array.isArray(flags[name])) {
+      throw new UserError(`--${name} was given more than once`, EXIT_USAGE)
+    }
+  }
+}
+
 // A boolean written `--force=` is an unset variable, not "on". Silently reading it as on would
 // force-accept a draft whose anchors do not resolve.
 function rejectEmptyBooleans(flags) {
@@ -228,6 +238,7 @@ function draftJourney(feature, flags) {
   // makes a network round trip per repo. Aborting after all that is a bad way to reject an
   // argument we could have rejected immediately.
   requireValues(flags, ['repos', 'seed', 'from', 'max'])
+  requireSingle(flags, ['out', 'from', 'max'])
 
   const ctx = autoSetup(feature, flags) ?? loadMap()
   const { map, root } = ctx
@@ -336,6 +347,8 @@ function showJourney(feature, flags) {
   const { map, root } = loadMap()
   // hasOwn, not bracket access: `journeys.constructor` is inherited, and `show journey
   // constructor` otherwise printed an empty journey and wrote a diagram file for it.
+  requireValues(flags, ['out'])
+  requireSingle(flags, ['out'])
   const accepted = Object.hasOwn(map.journeys, feature) ? map.journeys[feature] : undefined
   const journey = accepted ?? loadDraft(root, feature).draft
   // Only a draft needs widening: verify's cone is built from the accepted journeys, so it
@@ -343,7 +356,6 @@ function showJourney(feature, flags) {
   // for a read-only command.
   syncForJourney(root, map, journey, flags, { widen: !accepted })
 
-  requireValues(flags, ['out'])
   if (flags.mermaid === true) {
     process.stdout.write(mermaid(map, feature, journey) + '\n')
     return
@@ -569,6 +581,7 @@ function verifyCmd(args, flags) {
     const skipped = [
       ...(result.contractsStranded ?? []).map((id) => ({ id, status: 'repo-unreachable', missing: [] })),
       ...(result.contractsOutOfScope ?? []).map((id) => ({ id, status: 'out-of-scope', missing: [] })),
+      ...(result.contractsUnregistered ?? []).map((id) => ({ id, status: 'repo-unregistered', missing: [] })),
     ]
     const rows = [
       ...result.broken.map(verifyRow),
@@ -932,11 +945,13 @@ async function main() {
 
   rejectEmptyBooleans(flags)
   if (flags.help === true || flags.h === true) return help()
-  if (name in PLANNED) {
+  // hasOwn: `in` walks the prototype, so `flowmap toString` reported itself as "not built yet"
+  // followed by the source of Object.prototype.toString.
+  if (Object.hasOwn(PLANNED, name)) {
     throw new UserError(`\`flowmap ${name}\` is not built yet — ${PLANNED[name]}.`, EXIT_USAGE)
   }
 
-  const command = COMMANDS[name]
+  const command = Object.hasOwn(COMMANDS, name) ? COMMANDS[name] : undefined
   if (!command) throw new UserError(`unknown command "${name}"\n\n${USAGE}`, EXIT_USAGE)
   return command(rest, flags)
 }

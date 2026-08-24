@@ -201,7 +201,8 @@ test('the agent format reports contracts it never checked', () => {
   const scoped = join(root, 'agent-scope.json')
   writeFileSync(scoped, JSON.stringify({
     repos: { a: { url: repo, branch: 'main' }, b: { url: repo, branch: 'main' } },
-    contracts: { onB: { kind: 'event', schema: 'b/src/handler.ts', fields: [] } },
+    // A bare path, so a run scoped to `a` genuinely cannot locate it.
+    contracts: { onB: { kind: 'event', schema: 'src/nowhere-at-all.ts', fields: [] } },
     journeys: {
       ja: { hops: [{ repo: 'a', reads: 'src/handler.ts::handleThing' }] },
       jb: { hops: [{ repo: 'b', reads: 'src/handler.ts::handleThing', outbound: 'onB' }] },
@@ -295,4 +296,22 @@ test('an empty value on a path flag is a usage error', () => {
   const r = flowmap('show', 'journey', 'checkout', '--out=')
   assert.equal(r.code, 2)
   assert.match(r.err, /needs a value/)
+})
+
+// `in` walks the prototype chain, so `flowmap toString` reported itself as "not built yet"
+// followed by the source of Object.prototype.toString.
+test('prototype keys are unknown commands, not planned ones', () => {
+  for (const key of ['toString', 'valueOf', 'constructor']) {
+    const r = flowmap(key)
+    assert.match(r.err, /unknown command/, `flowmap ${key}`)
+    assert.doesNotMatch(r.err, /not built yet/)
+  }
+})
+
+// A path flag repeated arrives as an array, passes the value guard, then fails a
+// typeof === 'string' test and silently writes to the default path instead.
+test('a repeated path flag is rejected rather than silently ignored', () => {
+  const r = flowmap('show', 'journey', 'checkout', '--out', 'a.md', '--out', 'b.md')
+  assert.equal(r.code, 2)
+  assert.match(r.err, /more than once/)
 })
