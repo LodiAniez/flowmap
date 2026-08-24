@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
-import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, writeFileSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -166,4 +166,38 @@ test('SCHEMA_OK survives the sparse cone too', async () => {
   const r = verify(root, map, mapPath)
   assert.equal(r.contracts.find((x) => x.id === 'order').status, c.SCHEMA_OK)
   assert.deepEqual(r.contractIssues, [])
+})
+
+// Correctness under the cone is only half of it: widening the cone until the checker works is
+// always possible, and costs the whole point of sparse. Measured on ten real repos, taking
+// the top-level directory per schema meant 96MB and 72-95% of each repo checked out. The cone
+// must stay tight AND let the schema's imports resolve.
+test('the cone stays tight while still resolving schema imports', async () => {
+  const { verify } = await import('../lib/verify.js')
+  const up = realRepo('tight', {
+    'src/api/handler.ts': 'export function handle() {}\n',
+    'src/types/base.ts': 'export const Base = z.object({ total: z.number() })\n',
+    'src/schemas/order.ts': "import { Base } from '../types/base.js'\nexport const Order = Base\n",
+    // Bulk that no anchor and no schema import refers to. It must not be fetched.
+    'src/unrelated/a.ts': 'export const a = 1\n',
+    'src/unrelated/b.ts': 'export const b = 1\n',
+    'docs/manual.md': '# not code\n',
+  })
+  const map = {
+    repos: { tight: { url: up, branch: 'main' } },
+    contracts: { order: { kind: 'event', schema: 'src/schemas/order.ts', fields: ['total'] } },
+    journeys: { flow: { hops: [{ repo: 'tight', reads: 'src/api/handler.ts::handle', outbound: 'order' }] } },
+    verified: {},
+  }
+  const mapPath = join(root, 'flowmap-tight.json')
+  writeFileSync(mapPath, JSON.stringify(map))
+
+  const r = verify(root, map, mapPath)
+  assert.equal(r.contracts.find((x) => x.id === 'order').status, c.SCHEMA_OK,
+    'the sibling import must still resolve')
+
+  const dir = join(root, '.flowmap-cache', 'tight')
+  assert.ok(existsSync(join(dir, 'src', 'types', 'base.ts')), 'the imported schema was fetched')
+  assert.ok(!existsSync(join(dir, 'src', 'unrelated', 'a.ts')),
+    'but nothing else was — widening to the top-level directory would pull this in')
 })

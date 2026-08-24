@@ -308,10 +308,12 @@ $ flowmap verify
       symbol not found
 ```
 
-It syncs **sparse** — the directories the anchors name, plus the top-level directory holding
-each contract's schema so the schema's own imports are readable. Kilobytes per repo, not a
-clone. A *full* run also touches every registered repo, because only a full run is entitled
-to say a schema exists nowhere; a scoped run stays within its scope.
+It syncs **sparse** in two passes: the directories the anchors and schemas name, then — after
+reading what landed — exactly the directories those schemas import from. Measured across ten
+real repos that is 17MB and 1–17% of each large repo, against 96MB if the cone is simply
+widened to the top-level directory. A *full* run also touches every registered repo, because
+only a full run is entitled to say a schema exists nowhere; a scoped run stays within its
+scope.
 
 It also checks each contract against the file at its `schema` path — a declared field whose
 name appears nowhere in its own schema is a strong signal, whatever the format:
