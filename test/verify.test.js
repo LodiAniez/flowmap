@@ -405,3 +405,17 @@ test('a run that checked nothing does not rewrite the map', () => {
   assert.equal(result.checked, 0)
   assert.equal(readFileSync(mapPath, 'utf8'), original, 'the file on disk is untouched')
 })
+
+// Discovery registers a repo whenever it merely mentions the search term, so entries nothing
+// uses accumulate — and once a full run sweeps the registry to locate bare schema paths, each
+// one costs a clone for nothing.
+test('registry entries nothing uses are reported', async () => {
+  const { unusedRepos } = await import('../lib/verify.js')
+  const map = {
+    repos: { svc: {}, holder: {}, nobody: {} },
+    contracts: { c: { schema: 'holder/src/x.ts', fields: [] } },
+    journeys: { flow: { hops: [{ repo: 'svc', reads: 'a.ts::b' }] } },
+  }
+  assert.deepEqual(unusedRepos(map), ['nobody'],
+    'svc hosts a hop and holder owns a schema; only nobody is dead weight')
+})

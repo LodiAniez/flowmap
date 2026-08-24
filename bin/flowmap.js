@@ -506,6 +506,12 @@ function verifyCmd(args, flags) {
         dim('  a schema absent from the repos we could read is not proof it is absent\n')
     )
   }
+  if (result.unusedRepos?.length) {
+    process.stdout.write(
+      `  ${dim(`${result.unusedRepos.length} registered repo(s) nothing uses: ${result.unusedRepos.join(', ')}`)}\n` +
+        dim('  no hop names them and no contract schema lives there — flowmap repo remove <id>\n')
+    )
+  }
   const ambiguous = result.contracts.filter((c) => c.status === 'schema-ambiguous')
   for (const c of ambiguous) {
     process.stdout.write(

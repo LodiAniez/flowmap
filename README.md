@@ -324,6 +324,10 @@ name appears nowhere in its own schema is a strong signal, whatever the format:
       not found in the schema: order.discount
 ```
 
+It also names registry entries nothing uses — no hop names them and no contract schema lives
+there. Discovery registers a repo whenever it merely mentions the search term, so these
+accumulate, and each one costs a clone on a full run.
+
 A bare `schema` path that exists in more than one registered repo is reported **ambiguous**
 rather than judged against whichever repo came first — qualify it as `<repo>/<path>`.
 
