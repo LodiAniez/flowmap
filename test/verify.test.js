@@ -443,3 +443,23 @@ test('a genuinely unused repo is still reported when every schema names its repo
   }
   assert.deepEqual(unusedRepos(map), ['nobody'])
 })
+
+// One located bare path is not licence to judge the rest: on a scoped run most contracts are
+// never checked, and the report would name the repo holding them.
+test('a partially-resolved bare-path map reports no unused repos', async () => {
+  const { unusedRepos } = await import('../lib/verify.js')
+  const map = {
+    repos: { api: {}, 'loyalty-contracts': {} },
+    contracts: {
+      OrderCreated: { schema: 'src/schemas/order.ts', fields: [] },
+      LoyaltyEvent: { schema: 'src/schemas/loyalty.ts', fields: [] },
+    },
+    journeys: { flow: { hops: [{ repo: 'api', reads: 'a.ts::b', outbound: 'OrderCreated' }] } },
+  }
+  // Only OrderCreated was located; LoyaltyEvent was never checked.
+  const partial = unusedRepos(map, { foundIn: ['api'], bareResolved: false })
+  assert.deepEqual(partial, [], 'the repo holding the unchecked schema must not be named')
+
+  const complete = unusedRepos(map, { foundIn: ['api', 'loyalty-contracts'], bareResolved: true })
+  assert.deepEqual(complete, [], 'and once both resolve, both repos are in use')
+})

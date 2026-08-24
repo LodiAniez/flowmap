@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { execFileSync, execFileSync as run } from 'node:child_process'
+import { execFileSync, spawnSync, execFileSync as run } from 'node:child_process'
 import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
@@ -29,15 +29,19 @@ writeFileSync(mapPath, JSON.stringify({
 // Runs the real binary. Returns { code, out, err } — never throws, because a non-zero exit
 // is itself something these tests assert on.
 function flowmap(...args) {
-  try {
-    const out = execFileSync('node', [CLI, ...args], {
-      encoding: 'utf8',
-      env: { ...process.env, FLOWMAP_FILE: mapPath, FLOWMAP_CACHE: join(root, '.cache'), NO_COLOR: '1' },
-    })
-    return { code: 0, out, err: '' }
-  } catch (e) {
-    return { code: e.status, out: e.stdout ?? '', err: e.stderr ?? '' }
+  // A trailing object overrides the environment — some cases need their own map file.
+  const opts = typeof args.at(-1) === 'object' ? args.pop() : {}
+  const env = {
+    ...process.env,
+    FLOWMAP_FILE: opts.mapPath ?? mapPath,
+    FLOWMAP_CACHE: opts.cache ?? join(root, '.cache'),
+    NO_COLOR: '1',
   }
+  // spawnSync, not execFileSync: the latter returns stdout only, so stderr is discarded
+  // whenever the command succeeds — and notices are written to stderr with an exit code of 0,
+  // which is precisely what these assert on.
+  const r = spawnSync('node', [CLI, ...args], { encoding: 'utf8', env })
+  return { code: r.status, out: r.stdout ?? '', err: r.stderr ?? '' }
 }
 
 test('an unknown journey name errors instead of reporting a clean pass', () => {
@@ -105,7 +109,7 @@ test('journey and impact emit the pinned column counts', () => {
 
 // A scope that resolves to nothing must not print a clean bill of health — the same rule the
 // journey-name guard enforces, applied to the repo scope.
-test('a repo scope that covers no hop errors instead of reporting success', () => {
+test('a repo scope that covers no hop says so instead of reporting success', () => {
   const orphan = join(root, 'orphan.json')
   writeFileSync(orphan, JSON.stringify({
     repos: { svc: { url: repo, branch: 'main' }, extra: { url: repo, branch: 'main' } },
@@ -113,19 +117,15 @@ test('a repo scope that covers no hop errors instead of reporting success', () =
     journeys: { checkout: { hops: [{ repo: 'svc', reads: 'src/handler.ts::handleThing' }] } },
     verified: {},
   }))
-  let out, code
-  try {
-    out = execFileSync('node', [CLI, 'verify', '--repos', 'extra'], {
-      encoding: 'utf8',
-      env: { ...process.env, FLOWMAP_FILE: orphan, FLOWMAP_CACHE: join(root, '.cache3'), NO_COLOR: '1' },
-    })
-    code = 0
-  } catch (e) {
-    out = (e.stdout ?? '') + (e.stderr ?? '')
-    code = e.status
-  }
+  // The notice goes to stderr, so capture both streams whichever way it exits.
+  const r = flowmap('verify', '--repos', 'extra', { mapPath: orphan, cache: join(root, '.cache3') })
+  const out = r.out + r.err
+  const code = r.code
   assert.doesNotMatch(out, /every anchor resolves/, 'a clean result here would mean nothing was checked')
-  assert.equal(code, 2)
+  assert.match(out, /nothing to verify/, 'and it must say so')
+  // Never a non-zero exit for a finding: --local is the documented PR-time scope, and a repo
+  // registered but not yet in a journey is an ordinary state. See DESIGN.md "Never a gate."
+  assert.equal(code, 0, 'reporting nothing to check is not a usage error')
 })
 
 // `--journey` with no value parses as true, list() yields [], and the run silently widens to
@@ -135,5 +135,26 @@ test('a scope flag with no value is rejected, not silently widened', () => {
     const r = flowmap('verify', flag)
     assert.equal(r.code, 2, `${flag} with no value must not run`)
     assert.match(r.err, /needs a value/)
+  }
+})
+
+// DESIGN.md: "No exit code that breaks CI." Every command must exit 0 for a finding, whatever
+// the finding is — the whole tool is advisory. Sweeping the surface rather than trusting that
+// each new guard remembered it.
+test('no command exits non-zero for a finding', () => {
+  const broken = join(root, 'findings.json')
+  writeFileSync(broken, JSON.stringify({
+    repos: { svc: { url: repo, branch: 'main' } },
+    contracts: { c: { kind: 'event', schema: 'src/gone.ts', fields: ['nope'] } },
+    journeys: { checkout: { hops: [{ repo: 'svc', reads: 'src/handler.ts::gone', outbound: 'c' }] } },
+    verified: {},
+  }))
+  const opts = { mapPath: broken, cache: join(root, '.cache-findings') }
+
+  // --local is excluded deliberately: run outside a registered repo it is a usage error, not
+  // a finding, and usage errors are allowed to exit 2.
+  for (const argv of [['verify'], ['journey', 'checkout'], ['impact', 'nope'], ['verify', '--format=agent']]) {
+    const r = flowmap(...argv, opts)
+    assert.equal(r.code, 0, `flowmap ${argv.join(' ')} must not exit non-zero on a finding`)
   }
 })

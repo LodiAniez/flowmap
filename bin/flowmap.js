@@ -237,7 +237,14 @@ function draftJourney(feature, flags) {
 }
 
 function checkJourney(feature, flags) {
-  const { root } = loadMap()
+  const { map, root } = loadMap()
+
+  // Same reason show and finalize widen: verify's cone is built from the journeys already in
+  // the map, so it cannot contain a draft's anchors. Resolving them against a narrowed
+  // checkout reports files that exist as missing.
+  const { draft } = loadDraft(root, feature)
+  syncForJourney(root, map, draft, flags)
+
   const { rows, path, hops } = checkDraft(root, feature)
 
   if (isAgentFormat(flags)) {
@@ -459,15 +466,19 @@ function verifyCmd(args, flags) {
   })
 
   if (!result.checked) {
-    throw new UserError(
-      (repoIds.length
-        ? `nothing to verify — no journey hop names repo(s) ${repoIds.join(', ')}.`
-        : requested.length
-          ? `nothing to verify — ${requested.join(', ')} has no anchored hops.`
-          : `nothing to verify — no journey in the map has a reads or writes anchor.`) +
-        `\nA clean result here would mean nothing was checked.`,
-      EXIT_USAGE
+    // Never a non-zero exit: --local is documented as the PR-time scope, and a repo that is
+    // registered but not yet in a journey is an ordinary state, not a usage error. See
+    // DESIGN.md "Advisory only. Never a gate."
+    process.stderr.write(
+      yellow(
+        repoIds.length
+          ? `nothing to verify — no journey hop names repo(s) ${repoIds.join(', ')}\n`
+          : requested.length
+            ? `nothing to verify — ${requested.join(', ')} has no anchored hops\n`
+            : `nothing to verify — no journey in the map has a reads or writes anchor\n`
+      ) + dim('  reporting this rather than a clean result, which would mean nothing was checked\n')
     )
+    return
   }
 
   if (isAgentFormat(flags)) {
