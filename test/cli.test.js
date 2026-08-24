@@ -328,3 +328,21 @@ test('a repeated numeric flag is rejected on every command that takes it', () =>
     assert.match(r.err, /more than once/)
   }
 })
+
+// `--check=` is an unset shell variable, and falling through to a full draft run means
+// autoSetup, discovery and a network round trip per repo instead of checking a draft.
+test('an empty or repeated --check does not become a draft run', () => {
+  const empty = flowmap('draft', 'journey', 'checkout', '--check=')
+  assert.equal(empty.code, 2, '--check= must not run a draft')
+  assert.match(empty.err, /needs a value/)
+
+  const twice = flowmap('draft', '--check', 'a', '--check', 'b')
+  assert.equal(twice.code, 2, 'and two names are not one draft called "a,b"')
+  assert.match(twice.err, /more than once/)
+})
+
+test('a repeated --branch on repo add is rejected rather than dropped', () => {
+  const r = flowmap('repo', 'add', 'x', repo, '--branch', 'main', '--branch', 'master')
+  assert.equal(r.code, 2)
+  assert.match(r.err, /more than once/)
+})

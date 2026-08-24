@@ -188,8 +188,13 @@ test('a run where every repo is unreachable reports itself as not recorded', () 
   const mapPath = join(root, 'flowmap-offline.json')
   writeFileSync(mapPath, JSON.stringify(map))
   const result = verify(root, map, mapPath)
-  assert.deepEqual(result.partial, ['svc'], 'an errored repo counts as not recorded')
-  assert.equal(map.verified.svc, undefined)
+  // `partial` means "skipped by scoping" and nothing else — a repo that failed to sync has its
+  // own error line and its own fix, and folding it in here produced a "scoped run" message on
+  // an unscoped run.
+  assert.deepEqual(result.partial, [], 'a sync failure is not a scoping decision')
+  assert.ok(result.repos[0].error, 'it is reported as an error instead')
+  assert.equal(result.repos[0].recorded, false)
+  assert.equal(map.verified.svc, undefined, 'and nothing is recorded')
 })
 
 // A repeated name pushed every anchor twice, so the scoped count exceeded the full count and

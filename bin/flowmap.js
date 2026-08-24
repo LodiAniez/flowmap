@@ -56,6 +56,14 @@ function help() {
 
 // A narrowed checkout has two causes with two different fixes; blaming the network for a
 // flag the user passed sends them looking in the wrong place.
+// The headline for a checkout that needs reporting. A stale origin is not a partial checkout:
+// the tree is complete, it is simply a different repository's.
+function narrowedHeadline(r, what) {
+  return r.staleOrigin
+    ? `warning: ${r.id} is a checkout of a different repository — ${what}\n`
+    : `warning: ${r.id} is a partial checkout — ${what}\n`
+}
+
 function narrowedHint(r) {
   if (r.staleOrigin) {
     return dim('  its registered url changed and --no-sync declined the re-fetch; these are the\n') +
@@ -156,7 +164,7 @@ function syncForJourney(root, map, journey, flags, { widen = true } = {}) {
   const synced = ensureSynced(root, map, ids, flags, 'full', { widen })
   for (const r of synced.filter(worthWarning)) {
     process.stderr.write(
-      yellow(`warning: ${r.id} is a partial checkout — anchors there may report as missing\n`) + narrowedHint(r)
+      yellow(narrowedHeadline(r, 'anchors there may report as missing')) + narrowedHint(r)
     )
   }
   return synced
@@ -260,7 +268,7 @@ function draftJourney(feature, flags) {
   })
 
   for (const r of synced.filter(worthWarning)) {
-    process.stderr.write(yellow(`warning: ${r.id} is a partial checkout — candidates may be incomplete\n`) + narrowedHint(r))
+    process.stderr.write(yellow(narrowedHeadline(r, 'candidates may be incomplete')) + narrowedHint(r))
   }
 
   const brief = buildBrief(root, map, {
@@ -630,6 +638,11 @@ function verifyCmd(args, flags) {
         dim('  add it with `flowmap repo add`, or fix the hop\n')
     )
   }
+  if (result.contractsPartial?.length) {
+    process.stdout.write(
+      `  ${yellow(`${result.contractsPartial.length} contract(s) not checked:`)} their repo's checkout came up incomplete\n`
+    )
+  }
   if (result.contractsOutOfScope?.length) {
     process.stdout.write(
       dim(`  ${result.contractsOutOfScope.length} contract(s) not checked: carried only by hops outside this run's scope\n`)
@@ -642,7 +655,10 @@ function verifyCmd(args, flags) {
       process.stdout.write(`      ${red(statusLabel(b.status) ?? b.status)}\n`)
     }
     process.stdout.write(
-      dim('\n  The map is out of date, not the code. Fix the anchors, or re-draft the journey.\n')
+      stale.length
+        ? dim('\n  Some checkouts are incomplete, so these may simply not have been fetched.\n') +
+            dim('  Re-run once origin is reachable before treating them as map drift.\n')
+        : dim('\n  The map is out of date, not the code. Fix the anchors, or re-draft the journey.\n')
     )
   } else if (result.rows.length) {
     process.stdout.write(`\n  ${green('every anchor resolves.')}\n`)
@@ -791,6 +807,7 @@ function repo(args, flags) {
     }
     if (!source) throw new UserError(`usage: flowmap repo add <id> <url-or-path>`, EXIT_USAGE)
     requireValues(flags, ['branch'])
+    requireSingle(flags, ['branch'])
 
     const resolved = normalizeSource(source)
 
@@ -862,7 +879,7 @@ function search(args, flags) {
   const results = searchRepos(root, ids, needle, { max, ignoreCase: flags.i === true })
 
   for (const s of synced.filter(worthWarning)) {
-    process.stderr.write(yellow(`warning: ${s.id} is a partial checkout — results may be incomplete\n`) + narrowedHint(s))
+    process.stderr.write(yellow(narrowedHeadline(s, 'results may be incomplete')) + narrowedHint(s))
   }
 
   if (isAgentFormat(flags)) {
@@ -926,6 +943,11 @@ const COMMANDS = {
   impact: impactCmd,
   verify: verifyCmd,
   draft: (args, flags) => {
+    // `--check=` (an unset shell variable) must not fall through to a full draft run.
+    if (flags.check !== undefined) {
+      requireValues(flags, flags.check === true ? [] : ['check'])
+      requireSingle(flags, ['check'])
+    }
     const target = flags.check === true ? args[args.length - 1] : flags.check
     if (target) return checkJourney(String(target), flags)
     return withNoun(draftJourney)(args, flags)

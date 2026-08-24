@@ -447,3 +447,20 @@ test('a malformed fields value is reported, not thrown', async () => {
   }
   assert.equal(check({ schema: 'src/standalone.ts' }).status, SCHEMA_OK, 'omitted is fine')
 })
+
+// looksLikePath accepts .mts/.cts/.jsx as schema files, but resolveImport did not try them —
+// so an extensionless import landing on one returned null, set `external`, and suppressed a
+// genuine fields-missing verdict.
+test('an extensionless import resolves to every extension the tool accepts', () => {
+  for (const ext of ['ts', 'tsx', 'mts', 'cts', 'js', 'jsx']) {
+    mkdirSync(join(repo, 'src', `ext-${ext}`), { recursive: true })
+    writeFileSync(join(repo, 'src', `ext-${ext}`, `base.${ext}`),
+      'export const Base = z.object({ deep: z.string() })\n')
+    writeFileSync(join(repo, 'src', `ext-${ext}`, 'entry.ts'),
+      "import { Base } from './base'\nexport const S = z.object({ own: z.string() })\n")
+
+    const r = check({ schema: `src/ext-${ext}/entry.ts`, fields: ['own', 'deep', 'absent'] })
+    assert.equal(r.status, FIELDS_MISSING, `.${ext} must resolve, not downgrade the verdict`)
+    assert.deepEqual(r.missing, ['absent'])
+  }
+})
