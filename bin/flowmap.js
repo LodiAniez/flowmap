@@ -417,6 +417,15 @@ function verifyCmd(args, flags) {
 
   // --local is the PR-time scope: only this repo's anchors, which are the only ones the
   // author could have broken. See DESIGN.md "Split checks by who can act on them".
+  for (const flag of ['journey', 'repos']) {
+    // `--journey` with no value parses as `true`, list() yields [], and the run silently
+    // widens to everything — the precise "the caller believes they scoped it" failure the
+    // name validation below exists to prevent.
+    if (flags[flag] === true) {
+      throw new UserError(`--${flag} needs a value`, EXIT_USAGE)
+    }
+  }
+
   let repoIds = list(flags.repos)
   if (flags.local === true) {
     const here = repoRoot()
@@ -481,6 +490,12 @@ function verifyCmd(args, flags) {
     )
   } else {
     process.stdout.write(`\n  ${green('every anchor resolves.')}\n`)
+  }
+  if (result.contractsSuppressedBy?.length) {
+    process.stdout.write(
+      `  ${yellow('contract checks inconclusive:')} could not reach ${result.contractsSuppressedBy.join(', ')}\n` +
+        dim('  a schema absent from the repos we could read is not proof it is absent\n')
+    )
   }
   if (result.contractIssues.length) {
     const definite = result.contractIssues.filter((c) => c.status !== 'schema-inconclusive').length
@@ -700,9 +715,16 @@ function search(args, flags) {
 function sync(args, flags) {
   const { map, root } = loadMap()
   const ids = scopeFor(map, flags, 'sync')
-  for (const r of syncMany(root, map, ids, { mode: 'full', refresh: flags['no-refresh'] !== true })) {
+  const results = syncMany(root, map, ids, {
+    mode: 'full',
+    // sync prepares checkouts for hand-grepping, so a tree verify narrowed must be widened.
+    widen: true,
+    refresh: flags['no-refresh'] !== true,
+  })
+  for (const r of results) {
     const state = r.fresh ? green('cloned') : r.refreshed ? cyan('refreshed') : dim('cached')
-    process.stdout.write(`  ${state}  ${bold(r.id)}  ${dim(`${r.branch} @ ${r.sha.slice(0, 7)}`)}\n`)
+    const partial = r.narrowed ? yellow('  partial — could not fetch the rest') : ''
+    process.stdout.write(`  ${state}  ${bold(r.id)}  ${dim(`${r.branch} @ ${r.sha.slice(0, 7)}`)}${partial}\n`)
   }
 }
 

@@ -201,3 +201,44 @@ test('the cone stays tight while still resolving schema imports', async () => {
   assert.ok(!existsSync(join(dir, 'src', 'unrelated', 'a.ts')),
     'but nothing else was — widening to the top-level directory would pull this in')
 })
+
+// A two-level import chain is the ordinary shape of a schema barrel. The first two-pass
+// implementation deferred its sync to after the loop, so level 2 was read off a disk that did
+// not have level 1 on it yet — a dead pass that never self-healed on re-runs either.
+test('FIELDS_MISSING survives a two-level import chain under a real verify', async () => {
+  const { verify } = await import('../lib/verify.js')
+  const up = realRepo('chain', {
+    'src/api/handler.ts': 'export function handle() {}\n',
+    'src/shared/common.ts': 'export const Common = z.object({ total: z.number() })\n',
+    'src/types/base.ts': "export * from '../shared/common.js'\n",
+    'src/schemas/order.ts': "import { Base } from '../types/base.js'\nexport const Order = Base\n",
+  })
+  const map = {
+    repos: { chain: { url: up, branch: 'main' } },
+    contracts: { order: { kind: 'event', schema: 'src/schemas/order.ts', fields: ['total', 'absent'] } },
+    journeys: { flow: { hops: [{ repo: 'chain', reads: 'src/api/handler.ts::handle', outbound: 'order' }] } },
+    verified: {},
+  }
+  const mapPath = join(root, 'flowmap-chain.json')
+  writeFileSync(mapPath, JSON.stringify(map))
+
+  const r = verify(root, map, mapPath)
+  const order = r.contracts.find((x) => x.id === 'order')
+  assert.equal(order.status, c.FIELDS_MISSING, 'two levels must resolve, not downgrade')
+  assert.deepEqual(order.missing, ['absent'], '`total` lives two hops away and must be found')
+})
+
+// The fifth spelling to make the definite verdict unreachable. A namespace import binds an
+// object; it does not republish a shape.
+test('FIELDS_MISSING is reachable with a namespace import of zod', () => {
+  writeFileSync(join(repo, 'src', 'nsimport.ts'),
+    "import * as z from 'zod'\nexport const S = z.object({ present: z.string() })\n")
+  const r = check({ schema: 'src/nsimport.ts', fields: ['present', 'absent'] })
+  assert.equal(r.status, c.FIELDS_MISSING, '`import * as z from "zod"` is not a hidden shape')
+  assert.deepEqual(r.missing, ['absent'])
+})
+
+test('a star re-export from a package is still inconclusive', () => {
+  writeFileSync(join(repo, 'src', 'starre.ts'), "export * from '@acme/shared'\n")
+  assert.equal(check({ schema: 'src/starre.ts', fields: ['anything'] }).status, c.INCONCLUSIVE)
+})

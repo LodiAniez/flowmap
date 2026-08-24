@@ -127,3 +127,13 @@ test('a repo scope that covers no hop errors instead of reporting success', () =
   assert.doesNotMatch(out, /every anchor resolves/, 'a clean result here would mean nothing was checked')
   assert.equal(code, 2)
 })
+
+// `--journey` with no value parses as true, list() yields [], and the run silently widens to
+// everything while the user believes it is scoped — then records it.
+test('a scope flag with no value is rejected, not silently widened', () => {
+  for (const flag of ['--journey', '--repos']) {
+    const r = flowmap('verify', flag)
+    assert.equal(r.code, 2, `${flag} with no value must not run`)
+    assert.match(r.err, /needs a value/)
+  }
+})
