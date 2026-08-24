@@ -800,3 +800,21 @@ test('a contract appears in at most one not-checked bucket', () => {
   const appearances = buckets.filter((b) => b.includes('shared')).length
   assert.equal(appearances, 1, 'exactly one bucket may claim it')
 })
+
+// A definitely-malformed map was summarised as "could not be confirmed", which reads as
+// flowmap being unsure when the defect is certain.
+test('a malformed-fields verdict is not summarised as inconclusive', async () => {
+  const { MALFORMED_FIELDS } = await import('../lib/contracts.js')
+  const map = {
+    repos: { svc: { url: upstream, branch: 'main' } },
+    contracts: { c: { kind: 'event', schema: 'src/handler.ts', fields: 'id,total' } },
+    verified: {},
+    journeys: { flow: { hops: [{ repo: 'svc', reads: 'src/handler.ts::handleThing', outbound: 'c' }] } },
+  }
+  const mapPath = join(root, 'flowmap-malformed-summary.json')
+  writeFileSync(mapPath, JSON.stringify(map))
+
+  const result = verify(root, map, mapPath)
+  const issue = result.contractIssues.find((c) => c.id === 'c')
+  assert.equal(issue?.status, MALFORMED_FIELDS, 'the verdict itself is definite')
+})

@@ -138,3 +138,19 @@ test('a hop fed by a contract an earlier hop did emit continues normally', () =>
   assert.equal(steps[1].restarted, null, 'hop 2 consumes what hop 1 emitted')
   assert.ok('order.total' in steps[1].in)
 })
+
+// `contracts.constructor` is inherited and truthy, so an undefined outbound id looked defined:
+// `declared` became [] rather than null, and every payload key was then reported as not in the
+// contract — a fabricated finding in the visualiser.
+test('a prototype-named contract id is treated as undefined', () => {
+  const j = {
+    hops: [
+      { repo: 'a', outbound: 'constructor', transform: [{ op: 'add', field: 'x', value: 1 }] },
+      { repo: 'b', inbound: 'toString', outbound: null },
+    ],
+  }
+  const { steps } = simulate({ contracts: {}, journeys: {} }, j, {})
+  assert.deepEqual(steps[0].extra, [], 'no contract means nothing to be extra to')
+  assert.deepEqual(steps[0].missing, [])
+  assert.equal(steps[1].restarted, null, 'and an inherited inbound does not restart the payload')
+})

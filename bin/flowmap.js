@@ -580,6 +580,12 @@ function verifyCmd(args, flags) {
   // returning ahead of this branch wrote nothing at all to stdout.
   const skippedRows = () =>
     contractRows([
+      // In-scope contracts whose verdict is itself "we did not check this". `take()` excludes
+      // them from the buckets below precisely because they are in scope, so without this a run
+      // reporting only these writes an empty TSV that reads as clean.
+      ...result.contracts.filter(
+        (c) => c.status === 'schema-repo-not-synced' || c.status === 'schema-ambiguous'
+      ),
       ...(result.contractsStranded ?? []).map((id) => ({ id, status: 'repo-unreachable', missing: [] })),
       ...(result.contractsOutOfScope ?? []).map((id) => ({ id, status: 'out-of-scope', missing: [] })),
       ...(result.contractsUnregistered ?? []).map((id) => ({ id, status: 'repo-unregistered', missing: [] })),
@@ -730,13 +736,20 @@ function verifyCmd(args, flags) {
     )
   }
   if (result.contractIssues.length) {
-    const definite = result.contractIssues.filter((c) => c.status === 'fields-missing').length
-    const absent = result.contractIssues.filter((c) => c.status === 'schema-not-found').length
-    const unsure = result.contractIssues.length - definite - absent
+    // An explicit split, not a subtraction: folding every other status into "could not be
+    // confirmed" described a definitely-malformed map as one flowmap was unsure about.
+    const count = (status) => result.contractIssues.filter((c) => c.status === status).length
+    const definite = count('fields-missing')
+    const absent = count('schema-not-found')
+    const malformed = count('fields-malformed')
+    const unsure = count('schema-inconclusive')
+    const other = result.contractIssues.length - definite - absent - malformed - unsure
     const parts = [
       definite ? `${definite} disagree with their schema` : '',
       absent ? `${absent} name a schema file that is not there` : '',
+      malformed ? `${malformed} have malformed fields` : '',
       unsure ? `${unsure} could not be confirmed` : '',
+      other ? `${other} other` : '',
     ]
     process.stdout.write(`\n  ${yellow(`contracts: ${parts.filter(Boolean).join(', ')}`)}\n`)
     for (const c of result.contractIssues) {
