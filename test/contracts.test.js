@@ -23,11 +23,12 @@ writeFileSync(join(repo, 'src', 'external.ts'),
   "import { Base } from '@acme/shared-schemas'\nexport const Ext = Base.extend({ local: z.string() })\n")
 
 process.env.FLOWMAP_CACHE = join(root, '.flowmap-cache')
-const { checkContract, parseSchemaRef, SCHEMA_OK, FIELDS_MISSING, SCHEMA_NOT_FOUND, NOT_A_PATH, NO_SCHEMA, INCONCLUSIVE } =
+const { checkContract, parseSchemaRef, SCHEMA_OK, FIELDS_MISSING, SCHEMA_NOT_FOUND, NOT_A_PATH, NO_SCHEMA, INCONCLUSIVE, UNSEARCHED } =
   await import('../lib/contracts.js')
 
 const map = { repos: { svc: {} }, contracts: {}, journeys: {} }
 const check = (contract) => checkContract(root, map, 'c', contract)
+const checkContractWith = (m, contract, synced) => checkContract(root, m, 'c', contract, { synced })
 
 test('parses the three schema reference shapes', () => {
   assert.deepEqual(parseSchemaRef('src/x.ts', ['svc']), { kind: 'path', repo: null, path: 'src/x.ts', symbol: null })
@@ -79,4 +80,30 @@ test('a schema path that does not exist is distinct from a missing field', () =>
 test('a package reference and an absent schema are not failures', () => {
   assert.equal(check({ schema: '@acme/proto SomeMessage', fields: ['x'] }).status, NOT_A_PATH)
   assert.equal(check({ fields: ['x'] }).status, NO_SCHEMA)
+})
+
+// parseAnchor rejects paths that climb out of the checkout; a schema ref must too, or it
+// reads arbitrary files off the machine and reports them as a passing contract.
+test('a schema path cannot escape the repo checkout', () => {
+  for (const ref of ['../../etc/passwd', '../outside.ts', '/etc/passwd']) {
+    assert.equal(parseSchemaRef(ref, ['svc']).kind, NOT_A_PATH, `${ref} must be rejected`)
+  }
+})
+
+test('a side-effect import is followed, since a schema file can arrive that way', () => {
+  writeFileSync(join(repo, 'src', 'side.ts'),
+    "import './schemas/order.js'\nexport const S = z.object({ own: z.string() })\n")
+  const r = check({ schema: 'src/side.ts', fields: ['own', 'currency'] })
+  assert.equal(r.status, SCHEMA_OK, 'currency comes from the side-effect imported file')
+})
+
+// "Not in the repos we fetched" is a different claim from "nowhere", and only the second is
+// a finding. Conflating them reported five healthy contracts as broken on a cold cache.
+test('a schema in a repo that was never synced is unsearched, not missing', () => {
+  const scoped = check({ schema: 'src/standalone.ts', fields: ['alpha'] })
+  assert.equal(scoped.status, SCHEMA_OK, 'baseline: it resolves when searchable')
+
+  const wider = { repos: { svc: {}, other: {} }, contracts: {}, journeys: {} }
+  const r = checkContractWith(wider, { schema: 'src/nowhere.ts', fields: ['x'] }, new Set(['svc']))
+  assert.equal(r.status, UNSEARCHED)
 })
