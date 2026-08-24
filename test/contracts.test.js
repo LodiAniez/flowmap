@@ -528,24 +528,38 @@ test('a commented-out import does not blunt the check', () => {
 
 // The deferred last-round judgement dropped the bindingless half of the rule, so the same
 // unfollowable include hid the shape at depth 2 and was invisible at depth 3 — the verdict
-// depended on how deep the include happened to sit.
-test('a bindingless include hides the shape at any depth', async () => {
+// depended on how deep the include happened to sit. Uses .proto, where a bindingless include
+// genuinely is the composition; in JS/TS the same line is a side effect and hides nothing.
+test('a whole-file include hides the shape at any depth', async () => {
   const { IMPORT_DEPTH } = await import('../lib/contracts.js')
   mkdirSync(join(repo, 'src', 'depths'), { recursive: true })
 
-  // Place the same include at each level of a chain as long as the walk.
   for (let at = 1; at <= IMPORT_DEPTH; at++) {
     for (let i = 1; i <= IMPORT_DEPTH; i++) {
-      const include = i === at ? 'import "google/protobuf/timestamp.proto"\n' : ''
-      const next = i < IMPORT_DEPTH ? `export * from './d${i + 1}.js'\n` : ''
-      writeFileSync(join(repo, 'src', 'depths', `d${i}.ts`), `${include}${next}export const L${i} = 1\n`)
+      const include = i === at ? 'import "google/protobuf/timestamp.proto";\n' : ''
+      const next = i < IMPORT_DEPTH ? `import "./d${i + 1}.proto";\n` : ''
+      writeFileSync(join(repo, 'src', 'depths', `d${i}.proto`), `${include}${next}message L${i} {}\n`)
     }
-    writeFileSync(join(repo, 'src', 'depths', 'entry.ts'), "export * from './d1.js'\n")
+    writeFileSync(join(repo, 'src', 'depths', 'entry.proto'), 'import "./d1.proto";\nmessage E {}\n')
 
     assert.equal(
-      check({ schema: 'src/depths/entry.ts', fields: ['nowhere'] }).status,
+      check({ schema: 'src/depths/entry.proto', fields: ['nowhere'] }).status,
       INCONCLUSIVE,
       `an unfollowable include at level ${at} must hide the shape`
     )
   }
+})
+
+// The counterpart: in JS/TS a bindingless import contributes nothing, and treating it as opaque
+// let one `import 'reflect-metadata'` anywhere in the graph turn every real verdict into
+// "could not tell".
+test('a JS side-effect import does not hide the shape', () => {
+  writeFileSync(join(repo, 'src', 'sideeffect.ts'),
+    "import 'reflect-metadata'\nimport './polyfills.js'\nimport { z } from 'zod'\n" +
+    'export const S = z.object({ id: z.string(), total: z.number() })\n')
+  writeFileSync(join(repo, 'src', 'polyfills.ts'), 'globalThis.x = 1\n')
+
+  const r = check({ schema: 'src/sideeffect.ts', fields: ['id', 'discountCode'] })
+  assert.equal(r.status, FIELDS_MISSING, 'a side effect composes nothing')
+  assert.deepEqual(r.missing, ['discountCode'])
 })

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { writeFileSync, mkdirSync, existsSync } from 'node:fs'
+import { writeFileSync, mkdirSync, existsSync, realpathSync } from 'node:fs'
 import { join, dirname, basename } from 'node:path'
 import { parseArgs, list, BOOLEAN_FLAGS } from '../lib/args.js'
 import { loadMap, findMapPath, resolveRepoIds, UserError, EXIT_OK, EXIT_ERROR, EXIT_USAGE } from '../lib/config.js'
@@ -87,19 +87,39 @@ const worthWarning = (r) => (r.narrowed && r.narrowedReason !== 'by-design') || 
 // Which registry entry the checkout we are standing in corresponds to. Matched on the repo's
 // origin url or its path first, falling back to the directory name — `repo add billing
 // ../billing-service` registers `billing` under a directory called `billing-service`.
+let localRepoIdCache
 function localRepoId(map) {
-  const here = repoRoot()
-  if (!here) return null
+  // Memoised: verifyCmd asks twice per run, and the loop below used to walk the filesystem
+  // upward once per registry entry.
+  if (localRepoIdCache !== undefined) return localRepoIdCache
 
+  const here = repoRoot()
+  if (!here) return (localRepoIdCache = null)
+
+  // git rev-parse --show-toplevel resolves symlinks; a path stored in the registry does not.
+  // On macOS /tmp is a symlink to /private/tmp, so the two never matched — precisely for a
+  // repo with no origin, which is the only case that reaches the path comparison at all.
+  const real = (p) => {
+    try {
+      return realpathSync(p)
+    } catch {
+      return p
+    }
+  }
+  const hereReal = real(here)
   const origin = originUrlOf(here)
+  const mapDir = dirname(findMapPath())
+
   for (const [id, entry] of Object.entries(map.repos ?? {})) {
     if (!entry?.url) continue
-    if (origin && entry.url === origin) return id
-    if (!isRemoteUrl(entry.url) && fromPortable(dirname(findMapPath()), entry.url) === here) return id
+    if (origin && entry.url === origin) return (localRepoIdCache = id)
+    if (!isRemoteUrl(entry.url) && real(fromPortable(mapDir, entry.url)) === hereReal) {
+      return (localRepoIdCache = id)
+    }
   }
 
   const name = basename(here)
-  return Object.hasOwn(map.repos ?? {}, name) ? name : null
+  return (localRepoIdCache = Object.hasOwn(map.repos ?? {}, name) ? name : null)
 }
 
 // Whether any of this journey's anchors fail to resolve against the current checkouts.

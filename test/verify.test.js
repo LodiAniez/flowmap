@@ -818,3 +818,37 @@ test('a malformed-fields verdict is not summarised as inconclusive', async () =>
   const issue = result.contractIssues.find((c) => c.id === 'c')
   assert.equal(issue?.status, MALFORMED_FIELDS, 'the verdict itself is definite')
 })
+
+// A contract with no schema has nothing to check, and a hop with no anchors never becomes a
+// sync target — so it fell through every bucket into "outside this run's scope" on a run that
+// had no scope, and emitted a TSV row for work that never existed.
+test('a contract with no schema is not reported as skipped', () => {
+  const map = {
+    repos: {
+      api: { url: upstream, branch: 'main' },
+      queue: { url: upstream, branch: 'main' },
+      queue2: { url: upstream, branch: 'main' },
+    },
+    // No schema: there is nothing to check either way.
+    contracts: { 'q.mid': { kind: 'queue' }, 'a.out': { kind: 'event', schema: 'api/src/handler.ts', fields: [] } },
+    verified: {},
+    journeys: {
+      flow: {
+        hops: [
+          { repo: 'api', reads: 'src/handler.ts::handleThing', outbound: 'a.out' },
+          // Two broker hops with no anchors of their own: `q.mid` is carried only by these, so
+          // no repo that touches it ever becomes a sync target.
+          { repo: 'queue', inbound: 'a.out', outbound: 'q.mid' },
+          { repo: 'queue2', inbound: 'q.mid' },
+        ],
+      },
+    },
+  }
+  const mapPath = join(root, 'flowmap-noschema-contract.json')
+  writeFileSync(mapPath, JSON.stringify(map))
+
+  const r = verify(root, map, mapPath)
+  for (const bucket of ['contractsOutOfScope', 'contractsStranded', 'contractsUnregistered', 'contractsPartial']) {
+    assert.deepEqual(r[bucket], [], `${bucket} must not carry a contract with nothing to check`)
+  }
+})
