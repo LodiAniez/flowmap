@@ -315,3 +315,16 @@ test('a repeated path flag is rejected rather than silently ignored', () => {
   assert.equal(r.code, 2)
   assert.match(r.err, /more than once/)
 })
+
+// The same flag behaved differently depending on the command: draft rejected a repeated --max,
+// search silently fell back to the default because Number(['5','7']) is NaN.
+test('a repeated numeric flag is rejected on every command that takes it', () => {
+  for (const argv of [
+    ['search', 'needle', '--max', '5', '--max', '7'],
+    ['visualize', '--port', '1', '--port', '2'],
+  ]) {
+    const r = flowmap(...argv)
+    assert.equal(r.code, 2, `flowmap ${argv.join(' ')} must not silently use a default`)
+    assert.match(r.err, /more than once/)
+  }
+})

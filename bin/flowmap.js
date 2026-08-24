@@ -72,6 +72,7 @@ const worthWarning = (r) => (r.narrowed && r.narrowedReason !== 'by-design') || 
 
 function scopeFor(map, flags, purpose) {
   requireValues(flags, ['repos', 'seed', 'max', 'out'])
+  requireSingle(flags, ['max', 'out'])
   return resolveRepoIds(map, list(flags.repos), { all: flags.all === true, purpose })
 }
 
@@ -733,6 +734,7 @@ async function visualize(args, flags) {
     )
   }
   requireValues(flags, ['port'])
+  requireSingle(flags, ['port'])
   const port = Number(flags.port) > 0 ? Number(flags.port) : 7777
   await serve({ root, mapPath: path, port })
   return true // keep the process alive

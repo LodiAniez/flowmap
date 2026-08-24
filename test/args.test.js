@@ -71,3 +71,13 @@ test('an explicit value on a boolean flag still yields a boolean', () => {
     assert.equal(parseArgs([`--local=${off}`]).flags.local, false, `--local=${off}`)
   }
 })
+
+// flags is a plain object, so `'constructor' in flags` is true on the first occurrence and the
+// value becomes [Object, 'bar']. Three other lookups in this change were converted to hasOwn
+// for exactly this reason; the parser itself was missed.
+test('a prototype-named flag is stored as its value, not appended to one', () => {
+  for (const name of ['constructor', 'toString', 'valueOf']) {
+    const { flags } = parseArgs(['search', 'foo', `--${name}`, 'bar'])
+    assert.equal(flags[name], 'bar', `--${name} must hold its value`)
+  }
+})

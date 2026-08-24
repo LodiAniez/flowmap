@@ -720,3 +720,23 @@ test('a registry defect is not reported as a sync failure', () => {
   assert.deepEqual(result.contractsOutOfScope, [], 'and there is no scope to be outside of')
   assert.deepEqual(result.contractsUnregistered, ['c'], 'it is a registry defect')
 })
+
+// The narrowed branch needs both `sparse-checkout set` and `sparse-checkout disable` to fail,
+// which takes an unreachable origin on a blobless clone — not reproducible here. What is
+// testable is that the common path is unaffected: a reachable repo is never flagged narrowed,
+// and is recorded. The decision itself (`covers(id) && !synced.narrowed`) is a one-line guard
+// whose other half is covered above.
+test('a reachable repo is not flagged narrowed, and records normally', () => {
+  const map = {
+    repos: { svc: { url: upstream, branch: 'main' } },
+    contracts: {},
+    verified: {},
+    journeys: { flow: { hops: [{ repo: 'svc', reads: 'src/handler.ts::handleThing' }] } },
+  }
+  const mapPath = join(root, 'flowmap-reachable.json')
+  writeFileSync(mapPath, JSON.stringify(map))
+
+  const result = verify(root, map, mapPath)
+  assert.equal(result.repos[0].narrowed, false)
+  assert.ok(map.verified.svc, 'and a complete checkout is still recorded')
+})
