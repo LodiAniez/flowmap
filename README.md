@@ -347,10 +347,11 @@ resolved, the map is wrong"*.
 | `<feature>` or `--journey <name>` | scope to one journey — **reports but does not record**, see below |
 | `--format=agent` | tab-separated; only anchors and contracts that need attention — a clean one is not news. Read the `status` column: `schema-inconclusive` means *could not tell*, not *broken* |
 
-**A scoped run does not update `verified`.** That record is per repo, but scoping to one
-journey resolves only that journey's anchors. Recording it would mark every *other* journey's
-hops in that repo as `ok` without having checked them, and would move the sha so the next run
-reports no drift. Scoped runs therefore report and stop; run `flowmap verify` bare to record.
+**A scoped run records only what it fully covered.** The `verified` record is per repo, so a
+repo is recorded when the scope happened to resolve *all* of its anchors — the common case of
+one journey per repo — and skipped when it did not, because recording a partial check would
+mark another journey's hops `ok` without having looked at them and move the sha so the next
+run reports no drift. The output names any repo it skipped for that reason.
 
 **It never fails.** Findings exit 0, like everything else here. A broken anchor means the
 map is out of date, not that someone's build should stop.

@@ -43,10 +43,10 @@ has not been checked against source. Run:
 flowmap verify
 ```
 
-Run it **bare**. A scoped run (`flowmap verify <feature>`) reports but deliberately does not
-record, because it only resolves one journey's anchors and recording would vouch for the
-others — so the status stays `unverified` and you are no better off. It is a few seconds and
-sparse-syncs only the anchored files.
+`flowmap verify <feature>` also works and is cheaper. It records a repo only when that one
+journey covered all of the repo's anchors — usually the case — and tells you which repos it
+skipped, so check that line before concluding a hop is verified. Either way it is a few
+seconds and sparse-syncs only the anchored files.
 
 If a hop still will not resolve afterwards, **the map is wrong about that hop** — read the
 source and say so in your report; do not quietly work around it.

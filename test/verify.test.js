@@ -323,3 +323,51 @@ test('a scoped run does not clone repos outside its scope', () => {
   const result = verify(root, map, mapPath, { journeys: ['flow'] })
   assert.deepEqual(result.repos.map((r) => r.id), ['svc'], 'only the scoped journey\'s repo')
 })
+
+// The docs claimed a scoped run never records; the code records whenever the scope happens to
+// cover all of a repo's anchors, which is the common one-journey-per-repo case. Pinning the
+// real behaviour so the two cannot drift apart again.
+test('a scoped run records a repo whose anchors it fully covered', () => {
+  const map = freshMap()
+  const mapPath = join(root, 'flowmap-scoped-covers.json')
+  writeFileSync(mapPath, JSON.stringify(map))
+
+  const result = verify(root, map, mapPath, { journeys: ['flow'] })
+  assert.deepEqual(result.partial, [], 'nothing was left unchecked in that repo')
+  assert.ok(map.verified.svc, 'so it is recorded')
+})
+
+// Declining to sweep a wide registry is also a reason we could not look everywhere. Without
+// it, a registry over the sweep guard turned a healthy contract into a red schema-not-found.
+test('a registry too wide to sweep does not produce a confident not-found', () => {
+  const shared = join(root, 'wide-shared')
+  mkdirSync(join(shared, 'src', 'schemas'), { recursive: true })
+  writeFileSync(join(shared, 'src', 'schemas', 'order.ts'), 'export const O = z.object({ total: 0 })\n')
+  run(['init', '-q', '-b', 'main'], shared)
+  run(['add', '-A'], shared)
+  run(['-c', 'user.email=t@e.com', '-c', 'user.name=t', 'commit', '-qm', 'init'], shared)
+
+  const repos = { svc: { url: upstream, branch: 'main' }, shared: { url: shared, branch: 'main' } }
+  for (let i = 0; i < 12; i++) repos[`filler${i}`] = { url: upstream, branch: 'main' }
+
+  const map = {
+    repos,
+    contracts: { order: { kind: 'event', schema: 'src/schemas/order.ts', fields: ['total'] } },
+    verified: {},
+    journeys: { flow: { hops: [{ repo: 'svc', reads: 'src/handler.ts::handleThing', outbound: 'order' }] } },
+  }
+  const mapPath = join(root, 'flowmap-wide.json')
+  writeFileSync(mapPath, JSON.stringify(map))
+
+  const result = verify(root, map, mapPath)
+  assert.deepEqual(result.contractIssues, [],
+    'the schema exists in a repo the sweep guard stopped us reaching')
+})
+
+test('a null contract entry does not crash the schema-repo scan', () => {
+  const map = freshMap()
+  map.contracts = { broken: null }
+  const mapPath = join(root, 'flowmap-nullcontract.json')
+  writeFileSync(mapPath, JSON.stringify(map))
+  assert.doesNotThrow(() => verify(root, map, mapPath, { journeys: ['flow'] }))
+})

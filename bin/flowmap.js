@@ -54,6 +54,14 @@ function help() {
   process.stdout.write(USAGE + '\n')
 }
 
+// A narrowed checkout has two causes with two different fixes; blaming the network for a
+// flag the user passed sends them looking in the wrong place.
+function narrowedHint(r) {
+  return r.narrowedReason === 'declined'
+    ? dim('  --no-sync declined to fetch the rest of it; drop the flag to search it all\n')
+    : dim('  flowmap could not fetch the rest of it; retry when origin is reachable\n')
+}
+
 function scopeFor(map, flags, purpose) {
   return resolveRepoIds(map, list(flags.repos), { all: flags.all === true, purpose })
 }
@@ -173,10 +181,7 @@ function draftJourney(feature, flags) {
   })
 
   for (const r of synced.filter((x) => x.narrowed)) {
-    process.stderr.write(
-      yellow(`warning: ${r.id} is still a partial checkout — candidates may be incomplete\n`) +
-        dim(`  flowmap could not fetch the rest of it; retry when origin is reachable\n`)
-    )
+    process.stderr.write(yellow(`warning: ${r.id} is a partial checkout — candidates may be incomplete\n`) + narrowedHint(r))
   }
 
   const brief = buildBrief(root, map, {
@@ -491,7 +496,7 @@ function verifyCmd(args, flags) {
   } else {
     process.stdout.write(`\n  ${green('every anchor resolves.')}\n`)
   }
-  if (result.contractsSuppressedBy?.length) {
+  if (result.contractsSuppressedBy?.length && result.contracts.length) {
     process.stdout.write(
       `  ${yellow('contract checks inconclusive:')} could not reach ${result.contractsSuppressedBy.join(', ')}\n` +
         dim('  a schema absent from the repos we could read is not proof it is absent\n')
@@ -679,10 +684,7 @@ function search(args, flags) {
   const results = searchRepos(root, ids, needle, { max, ignoreCase: flags.i === true })
 
   for (const s of synced.filter((r) => r.narrowed)) {
-    process.stderr.write(
-      yellow(`warning: ${s.id} is still a partial checkout — results may be incomplete\n`) +
-        dim(`  flowmap could not fetch the rest of it; retry when origin is reachable\n`)
-    )
+    process.stderr.write(yellow(`warning: ${s.id} is a partial checkout — results may be incomplete\n`) + narrowedHint(s))
   }
 
   if (isAgentFormat(flags)) {
