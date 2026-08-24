@@ -40,12 +40,16 @@ The `status` column is `ok`, `stale` or `unverified`. Anything other than `ok` m
 has not been checked against source. Run:
 
 ```
-flowmap verify <feature>
+flowmap verify
 ```
 
-It is a few seconds and sparse-syncs only the anchored files. If a hop still will not resolve
-afterwards, **the map is wrong about that hop** — read the source and say so in your report;
-do not quietly work around it.
+Run it **bare**. A scoped run (`flowmap verify <feature>`) reports but deliberately does not
+record, because it only resolves one journey's anchors and recording would vouch for the
+others — so the status stays `unverified` and you are no better off. It is a few seconds and
+sparse-syncs only the anchored files.
+
+If a hop still will not resolve afterwards, **the map is wrong about that hop** — read the
+source and say so in your report; do not quietly work around it.
 
 **4. Open only the anchored files.** The map already names them. Do not re-derive the
 architecture by grepping the repos — that is the cost the map exists to remove. Use
@@ -84,8 +88,8 @@ architecture by grepping the repos — that is the cost the map exists to remove
 
 Code that moves invalidates the map. When the work lands:
 
-- A renamed or moved symbol breaks an anchor — `flowmap verify <feature>` will catch it, and
-  the anchor needs updating in `flowmap.json`.
+- A renamed or moved symbol breaks an anchor — `flowmap verify` will catch it, and the anchor
+  needs updating in `flowmap.json`.
 - A new field on a contract should be added to that contract's `fields`, with its type.
 - A changed payload transform should be updated on the hop, read from the code, not guessed.
 - A genuinely new hop means re-drafting: `/flowmap-draft-journey <feature>`.

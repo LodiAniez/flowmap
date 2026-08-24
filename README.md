@@ -448,11 +448,11 @@ header. Cells never contain tabs or newlines.
 | `journey` | `hop`, `repo`, `inbound`, `outbound`, `reads`, `writes`, `status` |
 | `impact` | `journey`, `hop`, `repo`, `side`, `contract`, `field`, `reads`, `writes`, `status` |
 | `verify` | `repo`, `journey`, `hop`, `side`, `anchor`, `status`, `line` |
+| `search` | `repo`, `path`, `line`, `text` |
+| `draft --check` | `hop`, `repo`, `side`, `anchor`, `status`, `line` |
 
 Contract findings reuse the `verify` columns rather than adding new ones: `side` is `schema`
 and `anchor` carries `<contract>:<field>`.
-| `search` | `repo`, `path`, `line`, `text` |
-| `draft --check` | `hop`, `repo`, `side`, `anchor`, `status`, `line` |
 
 A missing value renders as `-`, never as an empty cell, so columns never shift.
 

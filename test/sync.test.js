@@ -70,3 +70,16 @@ test('the sparse cone is re-applied on refresh, not frozen at clone time', () =>
   })
   assert.ok(existsSync(join(second.dir, 'two', 'b.ts')), 'a widened cone takes effect')
 })
+
+// verify runs with mode:'sparse'. Narrowing a checkout that search/draft cloned full would
+// silently truncate the tree they grep, and nothing ever widens it again.
+test('a full checkout is never converted to sparse by a later sparse refresh', () => {
+  const up = makeUpstream('svc-full', { 'one/a.ts': 'export const a = 1\n', 'two/b.ts': 'export const findme = 1\n' })
+  syncRepo(root, 'svc-full', { url: up, branch: 'main' }, { mode: 'full' })
+
+  const after = syncRepo(root, 'svc-full', { url: up, branch: 'main' }, {
+    mode: 'sparse', refresh: true, paths: ['one'],
+  })
+  assert.ok(existsSync(join(after.dir, 'two', 'b.ts')),
+    'the full tree survives, or search and draft would go blind')
+})

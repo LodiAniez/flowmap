@@ -155,3 +155,39 @@ test('a repo-scoped run over all its journeys still records', () => {
   assert.deepEqual(result.partial, [], 'scoping by repo is not partial coverage of that repo')
   assert.ok(map.verified.svc)
 })
+
+// Cone mode rejects a leading slash, which failed the whole sparse-checkout command and made
+// verify fall back to materialising the entire repo.
+test('a root-level file contributes "." to the sparse cone, not "/"', async () => {
+  const { anchorsByRepo } = await import('../lib/verify.js')
+  const mod = await import('../lib/verify.js')
+  // pathsFor is internal; exercise it through a map whose anchor sits at the repo root.
+  const map = {
+    repos: { svc: { url: upstream, branch: 'main' } },
+    contracts: { c: { schema: 'schema.gql', fields: [] } },
+    journeys: { flow: { hops: [{ repo: 'svc', reads: 'root.ts::thing' }] } },
+    verified: {},
+  }
+  const mapPath = join(root, 'flowmap-root.json')
+  writeFileSync(mapPath, JSON.stringify(map))
+  const result = mod.verify(root, map, mapPath)
+  // The run must complete rather than dying on the cone; the anchor itself is expected to fail.
+  assert.ok(result.repos[0].sha, 'the repo synced despite root-level paths')
+  assert.equal(result.repos[0].error, undefined)
+  void anchorsByRepo
+})
+
+// An entirely offline run records nothing, and must not claim otherwise.
+test('a run where every repo is unreachable reports itself as not recorded', () => {
+  const map = {
+    repos: { svc: { url: '/nonexistent/nowhere', branch: 'main' } },
+    contracts: {},
+    journeys: { flow: { hops: [{ repo: 'svc', reads: 'a.ts::b' }] } },
+    verified: {},
+  }
+  const mapPath = join(root, 'flowmap-offline.json')
+  writeFileSync(mapPath, JSON.stringify(map))
+  const result = verify(root, map, mapPath)
+  assert.deepEqual(result.partial, ['svc'], 'an errored repo counts as not recorded')
+  assert.equal(map.verified.svc, undefined)
+})

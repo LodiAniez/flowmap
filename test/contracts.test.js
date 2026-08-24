@@ -97,13 +97,72 @@ test('a side-effect import is followed, since a schema file can arrive that way'
   assert.equal(r.status, SCHEMA_OK, 'currency comes from the side-effect imported file')
 })
 
-// "Not in the repos we fetched" is a different claim from "nowhere", and only the second is
-// a finding. Conflating them reported five healthy contracts as broken on a cold cache.
-test('a schema in a repo that was never synced is unsearched, not missing', () => {
-  const scoped = check({ schema: 'src/standalone.ts', fields: ['alpha'] })
-  assert.equal(scoped.status, SCHEMA_OK, 'baseline: it resolves when searchable')
-
+// "We searched and it is not there" and "we never looked" are different claims, and only the
+// first is a finding. But over-applying the second made a genuine missing schema unreportable
+// as soon as one unsynced repo existed anywhere in the registry.
+test('searching a repo and not finding the schema is a finding', () => {
   const wider = { repos: { svc: {}, other: {} }, contracts: {}, journeys: {} }
   const r = checkContractWith(wider, { schema: 'src/nowhere.ts', fields: ['x'] }, new Set(['svc']))
+  assert.equal(r.status, SCHEMA_NOT_FOUND, 'svc was searched; absence there is real')
+})
+
+test('having searched nothing at all is unsearched, not missing', () => {
+  const wider = { repos: { svc: {}, other: {} }, contracts: {}, journeys: {} }
+  const r = checkContractWith(wider, { schema: 'src/nowhere.ts', fields: ['x'] }, new Set())
   assert.equal(r.status, UNSEARCHED)
+})
+
+// `import { z } from 'zod'` does not hide any part of the shape, but treating every package
+// import as opaque made INCONCLUSIVE universal for TypeScript — the check's one definite
+// verdict became unreachable.
+test('an incidental package import does not make the check inconclusive', () => {
+  writeFileSync(join(repo, 'src', 'plain.ts'),
+    "import { z } from 'zod'\nimport { randomUUID } from 'node:crypto'\nexport const S = z.object({ alpha: z.string() })\n")
+  const r = check({ schema: 'src/plain.ts', fields: ['alpha', 'ghost'] })
+  assert.equal(r.status, FIELDS_MISSING, 'zod is not part of the shape')
+  assert.deepEqual(r.missing, ['ghost'])
+})
+
+test('a package the schema actually composes from is inconclusive', () => {
+  writeFileSync(join(repo, 'src', 'composed.ts'),
+    "import { Base } from '@acme/shared'\nexport const S = Base.extend({ own: z.string() })\n")
+  assert.equal(check({ schema: 'src/composed.ts', fields: ['own', 'fromBase'] }).status, INCONCLUSIVE)
+})
+
+test('an unreadable relative import is inconclusive, not a missing field', () => {
+  writeFileSync(join(repo, 'src', 'dangling.ts'),
+    "import { Other } from './not-on-disk.js'\nexport const S = z.object({ own: z.string() })\n")
+  // Absent from a sparse checkout or genuinely deleted — either way part of the shape is hidden.
+  assert.equal(check({ schema: 'src/dangling.ts', fields: ['own', 'elsewhere'] }).status, INCONCLUSIVE)
+})
+
+test('a followed import cannot climb out of the repo checkout', () => {
+  writeFileSync(join(root, 'OUTSIDE.ts'), 'export const secretField = 1\n')
+  writeFileSync(join(repo, 'src', 'escape.ts'),
+    "import { x } from '../../../OUTSIDE.js'\nexport const S = z.object({ own: z.string() })\n")
+  const r = check({ schema: 'src/escape.ts', fields: ['secretField'] })
+  assert.notEqual(r.status, SCHEMA_OK, 'must not resolve a field by reading outside the repo')
+})
+
+// Schema barrels are written `export * from './x.js'`. Matching only `import … from` made
+// every contract behind a barrel report fields that are plainly in its schema.
+test('re-exports are followed, not just imports', () => {
+  mkdirSync(join(repo, 'src', 'barrel'), { recursive: true })
+  writeFileSync(join(repo, 'src', 'barrel', 'member.ts'),
+    'export const Member = z.object({ firstName: z.string(), lastName: z.string() })\n')
+  writeFileSync(join(repo, 'src', 'barrel', 'index.ts'), "export * from './member.js'\n")
+  writeFileSync(join(repo, 'src', 'via-barrel.ts'),
+    "import { Member } from './barrel/index.js'\nexport const route = { body: Member }\n")
+
+  const r = check({ schema: 'src/via-barrel.ts', fields: ['firstName', 'lastName'] })
+  assert.equal(r.status, SCHEMA_OK, 'fields arrive through the barrel')
+})
+
+test('depth exhaustion with files still unexplored is inconclusive', () => {
+  // three levels of relative hops, one more than the follower goes
+  writeFileSync(join(repo, 'src', 'd3.ts'), 'export const Deep = z.object({ buried: z.string() })\n')
+  writeFileSync(join(repo, 'src', 'd2.ts'), "export * from './d3.js'\n")
+  writeFileSync(join(repo, 'src', 'd1.ts'), "export * from './d2.js'\n")
+  writeFileSync(join(repo, 'src', 'd0.ts'), "import './d1.js'\nexport const S = z.object({ own: z.string() })\n")
+  assert.equal(check({ schema: 'src/d0.ts', fields: ['own', 'buried'] }).status, INCONCLUSIVE)
 })

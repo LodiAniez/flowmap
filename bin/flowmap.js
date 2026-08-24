@@ -460,9 +460,20 @@ function verifyCmd(args, flags) {
     process.stdout.write(`\n  ${green('every anchor resolves.')}\n`)
   }
   if (result.contractIssues.length) {
-    process.stdout.write(`\n  ${yellow(`${result.contractIssues.length} contract(s) disagree with their schema:`)}\n`)
+    const definite = result.contractIssues.filter((c) => c.status !== 'schema-inconclusive').length
+    const unsure = result.contractIssues.length - definite
+    const parts = [definite ? `${definite} disagree with their schema` : '', unsure ? `${unsure} could not be confirmed` : '']
+    process.stdout.write(`\n  ${yellow(`contracts: ${parts.filter(Boolean).join(', ')}`)}\n`)
     for (const c of result.contractIssues) {
-      if (c.missing.length) {
+      if (c.status === 'schema-inconclusive') {
+        // A flagged unknown must not read as a finding — that is the whole point of the
+        // status. The schema composes from something we could not read.
+        process.stdout.write(`    ${cyan(c.id)} ${dim(`— ${c.path}`)}\n`)
+        process.stdout.write(
+          `      ${yellow(`could not confirm: ${c.missing.join(', ')}`)}\n` +
+            dim(`      the schema composes from a source flowmap cannot read\n`)
+        )
+      } else if (c.missing.length) {
         process.stdout.write(`    ${cyan(c.id)} ${dim(`— ${c.path}`)}\n`)
         process.stdout.write(`      ${red(`not found in the schema: ${c.missing.join(', ')}`)}\n`)
       } else {
