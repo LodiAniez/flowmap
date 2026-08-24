@@ -381,6 +381,9 @@ function verifyCmd(args, flags) {
 
   // `flowmap verify <feature>` is the obvious spelling, so accept it rather than silently
   // verifying everything and letting the caller believe they scoped it.
+  if (!Object.keys(map.journeys).length) {
+    throw new UserError(`no journeys in ${display(root, path)} yet — flowmap draft journey <feature>`)
+  }
   const named = args.filter((a) => !NOUNS.has(a))
 
   // Validate every spelling, positional and flag alike. An unrecognised name would otherwise
@@ -426,6 +429,15 @@ function verifyCmd(args, flags) {
     const rows = [...result.broken.map(verifyRow), ...contractRows(result.contractIssues)]
     if (rows.length) process.stdout.write(tsv(rows) + '\n')
     return
+  }
+
+  if (!result.repos.length) {
+    throw new UserError(
+      `nothing to verify in that scope — no journey hop names ` +
+        (repoIds.length ? `repo(s) ${repoIds.join(', ')}` : 'those journeys') + `.\n` +
+        `A clean result here would mean nothing was checked.`,
+      EXIT_USAGE
+    )
   }
 
   for (const r of result.repos) {
@@ -637,10 +649,17 @@ function search(args, flags) {
 
   const { map, root } = loadMap()
   const ids = scopeFor(map, flags, 'search')
-  ensureSynced(root, map, ids, flags, 'full', { widen: true })
+  const synced = ensureSynced(root, map, ids, flags, 'full', { widen: true })
 
   const max = Number(flags.max) > 0 ? Number(flags.max) : 50
   const results = searchRepos(root, ids, needle, { max, ignoreCase: flags.i === true })
+
+  for (const s of synced.filter((r) => r.narrowed)) {
+    process.stderr.write(
+      yellow(`warning: ${s.id} is still a partial checkout — results may be incomplete\n`) +
+        dim(`  flowmap could not fetch the rest of it; retry when origin is reachable\n`)
+    )
+  }
 
   if (isAgentFormat(flags)) {
     const rows = results.flatMap((r) => r.hits.map((h) => [h.repo, h.path, h.line, h.text]))

@@ -106,11 +106,24 @@ test('searching every candidate repo and not finding the schema is a finding', (
   assert.equal(r.status, SCHEMA_NOT_FOUND, 'nothing was left unsearched, so absence is real')
 })
 
-// The --local / --repos case: some repos synced, but not the one that owns the schema.
-test('leaving a candidate repo unsearched is unsearched, not missing', () => {
-  const wider = { repos: { svc: {}, other: {} }, contracts: {}, journeys: {} }
-  const r = checkContractWith(wider, { schema: 'src/nowhere.ts', fields: ['x'] }, new Set(['svc']))
-  assert.equal(r.status, UNSEARCHED, 'other was never looked in')
+// The --local / --repos case: a hop tells us which repo owns the contract, and that repo was
+// not synced. The question is genuinely open.
+test('an unsynced repo that a hop points at leaves the question open', () => {
+  const withHops = {
+    repos: { svc: {}, owner: {} },
+    contracts: {},
+    journeys: { flow: { hops: [{ repo: 'owner', inbound: 'c', reads: 'x.ts::y' }] } },
+  }
+  const r = checkContractWith(withHops, { schema: 'src/nowhere.ts', fields: ['x'] }, new Set(['svc']))
+  assert.equal(r.status, UNSEARCHED, 'owner was never looked in')
+})
+
+// The counterpart, and the one that made the real verdict unreachable: when nothing points
+// anywhere the candidate set is a guess, and a guess must not excuse the search.
+test('a guessed sweep that found nothing is a finding, not an excuse', () => {
+  const noHops = { repos: { svc: {}, extra: {} }, contracts: {}, journeys: {} }
+  const r = checkContractWith(noHops, { schema: 'src/nowhere.ts', fields: ['x'] }, new Set(['svc']))
+  assert.equal(r.status, SCHEMA_NOT_FOUND, 'a hopless repo must not hide a real miss')
 })
 
 test('a repo-qualified ref is judged only against that repo', () => {
@@ -172,4 +185,12 @@ test('depth exhaustion with files still unexplored is inconclusive', () => {
   writeFileSync(join(repo, 'src', 'd1.ts'), "export * from './d2.js'\n")
   writeFileSync(join(repo, 'src', 'd0.ts'), "import './d1.js'\nexport const S = z.object({ own: z.string() })\n")
   assert.equal(check({ schema: 'src/d0.ts', fields: ['own', 'buried'] }).status, INCONCLUSIVE)
+})
+
+// A malformed map should surface as an error the CLI can explain, not a raw TypeError.
+test('a null journey or contract entry does not throw', () => {
+  const broken = { repos: { svc: {} }, contracts: {}, journeys: { x: null } }
+  assert.doesNotThrow(() => checkContractWith(broken, { schema: 'src/standalone.ts', fields: [] }, null))
+  assert.doesNotThrow(() => checkContractWith(broken, null, null))
+  assert.equal(checkContractWith(broken, null, null).status, NO_SCHEMA)
 })

@@ -102,3 +102,28 @@ test('journey and impact emit the pinned column counts', () => {
   const i = flowmap('impact', 'nothing-matches', '--format=agent')
   assert.equal(i.code, 0, 'an empty impact result is not an error')
 })
+
+// A scope that resolves to nothing must not print a clean bill of health — the same rule the
+// journey-name guard enforces, applied to the repo scope.
+test('a repo scope that covers no hop errors instead of reporting success', () => {
+  const orphan = join(root, 'orphan.json')
+  writeFileSync(orphan, JSON.stringify({
+    repos: { svc: { url: repo, branch: 'main' }, extra: { url: repo, branch: 'main' } },
+    contracts: {},
+    journeys: { checkout: { hops: [{ repo: 'svc', reads: 'src/handler.ts::handleThing' }] } },
+    verified: {},
+  }))
+  let out, code
+  try {
+    out = execFileSync('node', [CLI, 'verify', '--repos', 'extra'], {
+      encoding: 'utf8',
+      env: { ...process.env, FLOWMAP_FILE: orphan, FLOWMAP_CACHE: join(root, '.cache3'), NO_COLOR: '1' },
+    })
+    code = 0
+  } catch (e) {
+    out = (e.stdout ?? '') + (e.stderr ?? '')
+    code = e.status
+  }
+  assert.doesNotMatch(out, /every anchor resolves/, 'a clean result here would mean nothing was checked')
+  assert.equal(code, 2)
+})

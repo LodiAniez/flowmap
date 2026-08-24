@@ -452,7 +452,7 @@ header. Cells never contain tabs or newlines.
 | `draft --check` | `hop`, `repo`, `side`, `anchor`, `status`, `line` |
 
 Contract findings reuse the `verify` columns rather than adding new ones: `side` is `schema`
-and `anchor` carries `<contract>:<field>`. Their `status` distinguishes `field-missing` (the
+and `anchor` carries `<contract>:<field>`. Their `status` distinguishes `fields-missing` (the
 schema really does not declare it) from `schema-inconclusive` (the schema composes from
 something flowmap could not read) — never treat the second as a defect.
 
