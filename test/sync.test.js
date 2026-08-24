@@ -83,3 +83,20 @@ test('a full checkout is never converted to sparse by a later sparse refresh', (
   assert.ok(existsSync(join(after.dir, 'two', 'b.ts')),
     'the full tree survives, or search and draft would go blind')
 })
+
+// The mirror of the previous test, and the more damaging direction: verify narrows a
+// checkout, then search greps whatever is on disk and reports a partial result as complete.
+test('a sparse checkout is widened before a full-mode command uses it', () => {
+  const up = makeUpstream('svc-widen', {
+    'anchored/a.ts': 'export const a = 1\n',
+    'elsewhere/b.ts': 'export const findMeAnywhere = 1\n',
+  })
+  syncRepo(root, 'svc-widen', { url: up, branch: 'main' }, { mode: 'sparse', paths: ['anchored'] })
+  const narrowed = join(root, '.flowmap-cache', 'svc-widen', 'elsewhere', 'b.ts')
+  assert.ok(!existsSync(narrowed), 'starts narrowed')
+
+  // No refresh flag: reconciliation must happen on plain reuse, which is how search calls it.
+  const after = syncRepo(root, 'svc-widen', { url: up, branch: 'main' }, { mode: 'full' })
+  assert.ok(existsSync(join(after.dir, 'elsewhere', 'b.ts')),
+    'search must not grep a truncated tree and call the result complete')
+})
